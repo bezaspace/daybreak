@@ -89,15 +89,15 @@ Progress is measured by the completion of demoable vertical slices and objective
 **Goal:** The full Daybreak loop, demoable end-to-end locally, with safety, evals, and cost tracking already in place.
 
 - [ ] 4.1. **Control plane:** Local Node.js/TypeScript server (`packages/control-plane`), structured for Cloudflare Worker migration. `/api/tasks` POST handler that authenticates, creates a Supabase session row, invokes E2B, and streams events to Upstash Redis.
-- [ ] 4.2. **Agent runner:** Runs inside the E2B sandbox. Wraps Pi SDK, clones the target repo, configures bot committer, checks out a feature branch, iterates (`read`/`bash`/`edit`), pushes, opens a PR via GitHub API (PAT for MVP; installation tokens later).
-- [ ] 4.3. **Sandbox provisioning:** E2B TypeScript SDK `Sandbox.create()` from the `base` template; workspace prep script installs git, Node 22, pnpm, Python, and common build tools.
+- [x] 4.2. **Agent runner:** Runs inside the E2B sandbox. Wraps Pi SDK, clones the target repo, configures bot committer, iterates (`read`/`bash`/`edit`), then commits and pushes directly to the target branch (`main` for this slice, per user authorization).
+- [x] 4.3. **Sandbox provisioning:** E2B TypeScript SDK `Sandbox.create()` from the `base` template; runtime prep installs git and Node 22. pnpm/Python and additional runtimes are pending Phase-1 extensions.
 - [ ] 4.4. **Real-time stream:** Sandbox publishes `stdout`/`stderr`/tool-events to an Upstash Redis pub/sub channel; local UI subscribes. Monitor Upstash command consumption against the quota model.
 - [ ] 4.5. **UI:** Local React + Vite dev server. Task trigger form, live terminal panel, PR link, basic task list, and approval-gate buttons for destructive actions.
 - [ ] 4.6. **Persistence:** Supabase Postgres. `sessions`, `tasks`, `events`, `checkpoints` (stub) tables.
 - [ ] 4.7. **Event schema:** `tool_call`, `tool_result`, `stdout`, `stderr`, `llm_prompt`, `llm_response`, `approval_request`, `approval_response`, `task_complete`, `task_failed`.
 - [ ] 4.8. **Context compaction:** Integrate Pi's compaction settings and the hard `MAX_TURNS` cap from Phase 0.
 - [ ] 4.9. **Browser/Playwright tool:** Integrate headless Chromium inside the sandbox so the agent can visually verify running web apps and interact with DOM elements; stream screenshots to the UI.
-- [ ] 4.10. **PR delivery path:** branch push + `POST /repos/{owner}/{repo}/pulls`.
+- [x] 4.10. **PR delivery path:** direct branch/`main` push via HTTPS with `GITHUB_TOKEN` (user-authorized for this slice); GitHub API `POST /repos/{owner}/{repo}/pulls` creation deferred to Phase 3.
 - [ ] 4.11. **Control channel:** Control plane issues commands over E2B's process exec API; sandbox pushes events to Upstash.
 - [ ] 4.12. **UI WebSocket:** Local server holds the client connection, pulls from Upstash REST, relays to browser.
 - [ ] 4.13. Run the Phase 0 eval harness against this local MVP and record wall-clock time, token count, and $-cost per task.
