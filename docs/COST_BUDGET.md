@@ -13,6 +13,18 @@ Daybreak is designed to live on free-tier infrastructure. This document records 
 | **Groq** | 30 RPM, 6K TPM, 1K RPD for most models | Groq docs |
 | **OpenRouter free** | 50 requests/day, 20 RPM | OpenRouter docs |
 
+## Observed Phase 1 exit-criteria run
+
+The `bezaspace/daybreak-target` failing-sum fixture produced a `task_complete` result with the following metrics on a free-tier LLM endpoint:
+
+- **Turns:** 6
+- **Tool calls:** 8
+- **Total tokens:** ~18,013
+- **Estimated cost:** $0.00 (free-tier provider)
+- **Wall-clock time:** ~10.8 s
+
+A `MAX_TURNS=3` override run aborted after 3 turns with `task_failed: Max turns (3) reached`, demonstrating the circuit breaker.
+
 ## Model cost assumptions
 
 Free providers are used wherever possible. For paid fallbacks, the target model is a small, cheap model such as `gpt-4o-mini` or `inclusionai/Ling-3.0-flash:free`:

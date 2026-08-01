@@ -99,7 +99,7 @@ export class TaskRunner {
     this.session.agent.beforeToolCall = async ({ toolCall, args }) => {
       const check = this.safety.beforeToolCall(toolCall.name, args);
       if (!check.allowed) {
-        console.error(pc.red(`\n[safety block] ${toolCall.name}: ${check.reason}`));
+        console.error(pc.red(`[safety block] ${toolCall.name}: ${check.reason}`));
         this.metrics.blockToolCall(toolCall.id, check.reason ?? "safety");
         return { block: true, reason: check.reason };
       }

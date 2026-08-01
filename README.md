@@ -2,7 +2,7 @@
 
 An open-source, cloud-native developer agent platform that autonomously plans, writes, executes, tests, and ships production software. Ingests natural-language prompts, GitHub Issues, or PR review comments; provisions an isolated Linux execution sandbox; and iterates toward a solution until tests pass and a pull request is submitted. Built with enterprise transparency, deep observability, and **time-travel state rewinding** at its core — every model prompt, token count, tool latency, and reasoning step is traceable, and a human can pause, rewind the agent's execution tree to any step, edit the context, and spawn a parallel attempt branch without starting over.
 
-**Status**: Phase 0 complete; Phase 1 local MVP implemented with E2B sandboxing (including a `daybreak-browser` template for Playwright/Chromium), Upstash streaming, PR delivery, Supabase persistence, and the browser tool streaming screenshots to the UI.
+**Status**: Phase 1 exit-criteria demo complete. The local React dashboard triggers an E2B sandbox run, streams the terminal live via Upstash Redis + Hono SSE, and produces a GitHub PR that passes CI from a `daybreak/<task-id>` feature branch. `MAX_TURNS`/`MAX_COST` circuit breakers and the sensitive-file denylist (no `.env` read) are verified.
 **Started**: 2026-08-01
 
 ---
@@ -67,9 +67,9 @@ Every milestone should be demoable on its own. Track cost, latency, and token us
 pnpm --filter @daybreak/evals eval:e2e
 # --- failing-sum ---
 # Task <id> started for https://github.com/bezaspace/daybreak-target @ main
-# Completed in 14161ms
-# PR: https://github.com/bezaspace/daybreak-target/pull/4
-# Metrics: { turns: 7, toolCalls: 9, estimatedCostUsd: 0, totalTokens: 21756, durationMs: 14161 }
+# Completed in 10800ms
+# PR: https://github.com/bezaspace/daybreak-target/pull/5
+# Metrics: { turns: 6, toolCalls: 8, estimatedCostUsd: 0, totalTokens: 18013, durationMs: 10800 }
 ```
 
 The summary table is printed at the end. Exit code is non-zero when any case fails or times out.

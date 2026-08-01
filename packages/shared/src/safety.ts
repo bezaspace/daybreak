@@ -101,6 +101,22 @@ function extractString(args: unknown, key: string): string | undefined {
   return undefined;
 }
 
+function commandContainsSensitivePath(command: string, patterns: string[]): boolean {
+  // Tokenize a bash command and check any token that looks like a file path.
+  // A token is treated as path-like if it contains a directory separator or a dot,
+  // which avoids false positives on commit messages such as "fix password validation".
+  const tokenize = (input: string): string[] =>
+    input
+      .split(/[\s;|&<>()`"'$\\]+/)
+      .map((t) => t.replace(/^["']+|["']+$/g, ""))
+      .filter((t) => t.length > 0);
+
+  for (const token of tokenize(command)) {
+    if (/[\/\\.]/.test(token) && isSensitivePath(token, patterns)) return true;
+  }
+  return false;
+}
+
 export class SafetyMiddleware {
   private config: DaybreakConfig;
   private approvedCommands = new Set<string>();
@@ -128,6 +144,14 @@ export class SafetyMiddleware {
     if (toolName === "bash") {
       const destructive = isDestructiveBash(args);
       if (!destructive.allowed) return destructive;
+
+      const command = extractString(args, "command") || "";
+      if (commandContainsSensitivePath(command, this.config.denylistPatterns)) {
+        return {
+          allowed: false,
+          reason: `Command references a sensitive path matching the denylist`,
+        };
+      }
 
       const protectedBranch = isGitCommandOnProtectedBranch(args, this.config.protectedBranches);
       if (!protectedBranch.allowed) return protectedBranch;

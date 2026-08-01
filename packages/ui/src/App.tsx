@@ -23,6 +23,23 @@ interface Screenshot {
   timestamp: number;
 }
 
+interface Config {
+  maxTurns: number;
+  maxWallClockMinutes: number;
+  maxCostUsd: number;
+  compactionEnabled: boolean;
+  e2bTemplate?: string;
+}
+
+interface TaskMetrics {
+  turns?: number;
+  toolCalls?: number;
+  blockedToolCalls?: number;
+  totalTokens?: number;
+  estimatedCostUsd?: number;
+  wallClockMs?: number;
+}
+
 function formatEvent(event: StreamEvent): string {
   const time = new Date(event.timestamp).toLocaleTimeString();
   if (event.type === "task_start") {
@@ -47,11 +64,25 @@ function formatEvent(event: StreamEvent): string {
     const data = event.data as { url?: string };
     return `[${time}] browser_screenshot: ${data.url || ""}`;
   }
+  if (event.type === "compaction_start") {
+    const data = event.data as { reason?: string };
+    return `[${time}] compaction_start: ${data.reason || ""}`;
+  }
+  if (event.type === "compaction_end") {
+    const data = event.data as { aborted?: boolean; tokensBefore?: number; firstKeptEntryId?: string };
+    return `[${time}] compaction_end: ${data.aborted ? "aborted" : `tokensBefore=${data.tokensBefore}, firstKept=${data.firstKeptEntryId}`}`;
+  }
   if (event.type === "task_complete" || event.type === "task_failed") {
     const data = event.data as { success?: boolean; error?: string };
     return `[${time}] ${event.type}${data.error ? ": " + data.error : ""}`;
   }
   return `[${time}] ${event.type}: ${JSON.stringify(event.data).slice(0, 200)}`;
+}
+
+function formatDuration(ms: number | undefined): string {
+  if (ms === undefined) return "-";
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
 }
 
 function getInitialTaskId(): string | null {
@@ -66,7 +97,10 @@ export function App() {
   const [events, setEvents] = useState<StreamEvent[]>([]);
   const [status, setStatus] = useState<string>("idle");
   const [prUrl, setPrUrl] = useState<string | null>(null);
+  const [prBranch, setPrBranch] = useState<string | null>(null);
   const [screenshots, setScreenshots] = useState<Screenshot[]>([]);
+  const [metrics, setMetrics] = useState<TaskMetrics | null>(null);
+  const [config, setConfig] = useState<Config | null>(null);
   const terminalRef = useRef<HTMLPreElement>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
 
@@ -77,8 +111,16 @@ export function App() {
       .catch(() => {});
   }
 
+  function loadConfig() {
+    fetch("/api/config")
+      .then((r) => r.json())
+      .then((data) => setConfig(data as Config))
+      .catch(() => {});
+  }
+
   useEffect(() => {
     loadTasks();
+    loadConfig();
   }, []);
 
   useEffect(() => {
@@ -86,7 +128,9 @@ export function App() {
     setEvents([]);
     setStatus("running");
     setPrUrl(null);
+    setPrBranch(null);
     setScreenshots([]);
+    setMetrics(null);
 
     const es = new EventSource(`/api/tasks/${taskId}/stream`);
     es.onmessage = (message) => {
@@ -109,19 +153,23 @@ export function App() {
           }
         }
         if (event.type === "pr_created") {
-          const data = event.data as { prUrl?: string };
+          const data = event.data as { prUrl?: string; prBranch?: string };
           if (data.prUrl) {
             setPrUrl(data.prUrl);
+            setPrBranch(data.prBranch || null);
             loadTasks();
             es.close();
           }
         }
         if (event.type === "task_complete") {
           setStatus("complete");
+          const data = event.data as { metrics?: TaskMetrics };
+          if (data.metrics) setMetrics(data.metrics);
         }
         if (event.type === "task_failed") {
           setStatus("failed");
-          es.close();
+          const data = event.data as { metrics?: TaskMetrics; error?: string };
+          if (data.metrics) setMetrics(data.metrics);
         }
       } catch {
         // ignore heartbeat or malformed
@@ -143,13 +191,16 @@ export function App() {
     }
   }, [events]);
 
-  async function startTask(e: React.FormEvent) {
-    e.preventDefault();
+  async function startTask(options?: { maxTurns?: number; maxCostUsd?: number; maxWallClockMinutes?: number }) {
     setStatus("starting");
+    const body: Record<string, unknown> = { repo, branch };
+    if (options?.maxTurns !== undefined) body.maxTurns = options.maxTurns;
+    if (options?.maxCostUsd !== undefined) body.maxCostUsd = options.maxCostUsd;
+    if (options?.maxWallClockMinutes !== undefined) body.maxWallClockMinutes = options.maxWallClockMinutes;
     const res = await fetch("/api/tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ repo, branch }),
+      body: JSON.stringify(body),
     });
     const data = await res.json();
     if (data.taskId) {
@@ -160,10 +211,47 @@ export function App() {
     }
   }
 
+  function startFailingSumDemo() {
+    setRepo("https://github.com/bezaspace/daybreak-target");
+    setBranch("main");
+    // Use a microtask so state updates before the fetch
+    setTimeout(() => startTask(), 0);
+  }
+
+  function startMaxTurnsDemo() {
+    setRepo("https://github.com/bezaspace/daybreak-target");
+    setBranch("main");
+    setTimeout(() => startTask({ maxTurns: 3 }), 0);
+  }
+
   return (
     <main style={{ fontFamily: "system-ui, sans-serif", padding: "2rem", maxWidth: 960, margin: "0 auto" }}>
       <h1>Daybreak</h1>
-      <form onSubmit={startTask} style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem" }}>
+
+      {config && (
+        <div style={{ color: "#666", fontSize: 14, marginBottom: "1rem" }}>
+          Circuit breakers: {config.maxTurns} turns · {config.maxWallClockMinutes} min · ${config.maxCostUsd} ·
+          compaction {config.compactionEnabled ? "on" : "off"}
+          {config.e2bTemplate ? ` · template ${config.e2bTemplate}` : ""}
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem" }}>
+        <button type="button" onClick={startFailingSumDemo} disabled={status === "starting" || status === "running"} style={{ padding: "0.5rem 1rem" }}>
+          Fix failing-sum test
+        </button>
+        <button type="button" onClick={startMaxTurnsDemo} disabled={status === "starting" || status === "running"} style={{ padding: "0.5rem 1rem" }}>
+          Demo MAX_TURNS=3 (should fail)
+        </button>
+      </div>
+
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          startTask();
+        }}
+        style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem" }}
+      >
         <input
           type="text"
           value={repo}
@@ -186,6 +274,7 @@ export function App() {
       {taskId && (
         <p style={{ color: "#666" }}>
           Task: <code>{taskId}</code> · Status: <strong>{status}</strong>
+          {prBranch && ` · branch: ${prBranch}`}
           {prUrl && (
             <span>
               {" · "}
@@ -195,6 +284,14 @@ export function App() {
             </span>
           )}
         </p>
+      )}
+
+      {metrics && (
+        <div style={{ background: "#f6f6f6", padding: "1rem", borderRadius: 8, marginBottom: "1rem" }}>
+          <strong>Metrics</strong>: turns {metrics.turns ?? "-"} · tool calls {metrics.toolCalls ?? "-"}
+          {metrics.blockedToolCalls ? ` · blocked ${metrics.blockedToolCalls}` : ""} · tokens {metrics.totalTokens ?? "-"} · cost{" "}
+          {typeof metrics.estimatedCostUsd === "number" ? `$${metrics.estimatedCostUsd.toFixed(4)}` : "-"} · wall-clock {formatDuration(metrics.wallClockMs)}
+        </div>
       )}
 
       {screenshots.length > 0 && (

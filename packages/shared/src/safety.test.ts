@@ -51,6 +51,26 @@ describe("SafetyMiddleware", () => {
     expect(result.reason).toContain("sensitive-file denylist");
   });
 
+  it("blocks reading .env via bash", () => {
+    const safety = new SafetyMiddleware(config);
+    const result = safety.beforeToolCall("bash", { command: "cat /home/user/target/.env" });
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("denylist");
+  });
+
+  it("blocks commit messages mentioning .env", () => {
+    const safety = new SafetyMiddleware(config);
+    const result = safety.beforeToolCall("bash", { command: "git commit -m 'update .env'" });
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain("denylist");
+  });
+
+  it("does not block commit messages with generic words", () => {
+    const safety = new SafetyMiddleware(config);
+    const result = safety.beforeToolCall("bash", { command: "git commit -m 'fix password validation'" });
+    expect(result.allowed).toBe(true);
+  });
+
   it("blocks destructive bash", () => {
     const safety = new SafetyMiddleware(config);
     const result = safety.beforeToolCall("bash", { command: "rm -rf /" });

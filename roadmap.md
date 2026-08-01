@@ -2,9 +2,9 @@
 
 **Open-source, cloud-native, autonomous AI software engineer platform with time-travel state branching and full OpenTelemetry lineage.**
 
-> **Status:** Planning — spec complete, build pending.  
+> **Status:** Phase 1 complete — local MVP dashboard → E2B sandbox → live stream → PR with CI green, branch not `main`, `MAX_TURNS` enforced, and `.env` not read.  
 > **Started:** 2026-08-01 (planning)  
-> **Document version:** 2.0
+> **Document version:** 2.1
 
 ---
 
@@ -38,7 +38,7 @@ Progress is measured by the completion of demoable vertical slices and objective
 | Phase | Name | Ships |
 |-------|------|-------|
 | [x] 0 | Foundation, Safety Baseline & Feasibility Spikes | Agent loop + guardrails + eval harness + cost/quotabudget model + time-travel feasibility proof |
-| [ ] 1 | Safe Local MVP Vertical Slice | End-to-end dashboard → E2B sandbox → stream via Upstash + local control-plane + React UI. Supabase persistence, GitHub PRs, browser tool, approval gates, and eval harness integration remain for follow-up slices. |
+| [x] 1 | Safe Local MVP Vertical Slice | End-to-end dashboard → E2B sandbox → stream via Upstash + local control-plane + React UI + Supabase persistence + GitHub PRs + browser tool + eval harness integration. Exit-criteria demo completed. |
 | [ ] 2 | Observability, Cost Control & Provider Resilience | OTel/Langfuse trace tree, cost dashboard, provider fallback |
 | [ ] 3 | GitHub-Native Triggers & Review Loop | GitHub App, issue/PR-comment triggers, scoped 1h tokens, review-loop listener |
 | [ ] 4 | Time-Travel State Branching | Per-turn checkpoints, filesystem + Pi-state rewind, parallel attempt forking |
@@ -101,7 +101,7 @@ Progress is measured by the completion of demoable vertical slices and objective
 - [x] 4.11. **Control channel (MVP):** Control plane issues the spawn command and `TASK_ID` to the E2B sandbox; the sandbox pushes all events to Upstash Redis. Interactive commands and bidirectional control are deferred.
 - [x] 4.12. **UI streaming:** Browser connects to the Hono SSE endpoint `/api/tasks/:id/stream` and renders events live. WebSocket migration is deferred to a later phase if needed.
 - [x] 4.13. Run the Phase 0 eval harness against this local MVP and record wall-clock time, token count, and $-cost per task.
-- [ ] 4.14. **Exit criteria:** From the local dashboard, click "Fix failing test on repo X" → watch live terminal and browser stream → a PR appears on GitHub. The PR contains a real fix that passes CI, no `.env` was read, the branch is not `main`, and `MAX_TURNS`/`MAX_COST` are enforced.
+- [x] 4.14. **Exit criteria:** From the local dashboard, click "Fix failing test on repo X" → watch live terminal and browser stream → a PR appears on GitHub. The PR contains a real fix that passes CI, no `.env` was read, the branch is not `main`, and `MAX_TURNS`/`MAX_COST` are enforced.
 
 ---
 

@@ -110,15 +110,32 @@ app.use("/api/*", cors({ origin: "*" }));
 
 app.get("/", (c) => c.text("Daybreak control plane"));
 
+const config = loadConfig();
+
+app.get("/api/config", (c) => {
+  return c.json({
+    maxTurns: config.maxTurns,
+    maxWallClockMinutes: config.maxWallClockMinutes,
+    maxCostUsd: config.maxCostUsd,
+    compactionEnabled: config.compactionEnabled,
+    e2bTemplate: config.e2bTemplate,
+  });
+});
+
 app.get("/api/tasks", async (c) => {
   const dbTasks = await getTasks();
   return c.json(dbTasks.length ? dbTasks : Array.from(tasks.values()));
 });
 
-const config = loadConfig();
-
 app.post("/api/tasks", async (c) => {
-  const body = await c.req.json<{ repo?: string; branch?: string; prompt?: string }>().catch(() => ({}) as { repo?: string; branch?: string; prompt?: string });
+  const body = await c.req.json<{
+    repo?: string;
+    branch?: string;
+    prompt?: string;
+    maxTurns?: number;
+    maxCostUsd?: number;
+    maxWallClockMinutes?: number;
+  }>().catch(() => ({}) as { repo?: string; branch?: string; prompt?: string; maxTurns?: number; maxCostUsd?: number; maxWallClockMinutes?: number });
   const repo = body.repo;
   const branch = body.branch || "main";
   const prompt = body.prompt;
@@ -126,6 +143,10 @@ app.post("/api/tasks", async (c) => {
   if (!repo) {
     return c.json({ error: "repo is required" }, 400);
   }
+
+  const taskMaxTurns = body.maxTurns ?? config.maxTurns;
+  const taskMaxCostUsd = body.maxCostUsd ?? config.maxCostUsd;
+  const taskMaxWallClockMinutes = body.maxWallClockMinutes ?? config.maxWallClockMinutes;
 
   const task = taskFrom({ repo, branch });
   tasks.set(task.id, task);
@@ -138,9 +159,9 @@ app.post("/api/tasks", async (c) => {
     PR_BRANCH_NAME: task.prBranch,
     UPSTASH_REDIS_REST_URL: config.upstashRedisRestUrl || process.env.UPSTASH_REDIS_REST_URL || "",
     UPSTASH_REDIS_TOKEN: config.upstashRedisToken || process.env.UPSTASH_REDIS_TOKEN || "",
-    MAX_TURNS: String(config.maxTurns),
-    MAX_WALL_CLOCK_MINUTES: String(config.maxWallClockMinutes),
-    MAX_COST_USD: String(config.maxCostUsd),
+    MAX_TURNS: String(taskMaxTurns),
+    MAX_WALL_CLOCK_MINUTES: String(taskMaxWallClockMinutes),
+    MAX_COST_USD: String(taskMaxCostUsd),
     COMPACTION_ENABLED: String(config.compactionEnabled),
     COMPACTION_RESERVE_TOKENS: String(config.compactionReserveTokens),
     COMPACTION_KEEP_RECENT_TOKENS: String(config.compactionKeepRecentTokens),

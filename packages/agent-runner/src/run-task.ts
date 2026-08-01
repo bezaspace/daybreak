@@ -20,7 +20,7 @@ const gitAskpassPath = process.env.GIT_ASKPASS || `${workDir}/.git-askpass.sh`;
 
 function getDefaultPrompt(): string {
   const pushInstructions = pushAfterFix
-    ? ` Then create and check out a new branch named "${prBranch}" with "git checkout -b ${prBranch}", stage the change with "git add -A", commit with "git -c user.name='Daybreak Bot' -c user.email='daybreak@example.com' commit -m 'fix: <concise message>'", and push to origin ${prBranch} with "git push -u origin ${prBranch}". Do not push to ${targetBranch} directly.`
+    ? ` You are already on branch "${prBranch}". After the test passes, stage the change with "git add -A", commit with "git commit -m 'fix: <concise message>'", and push to origin with "git push -u origin ${prBranch}". Do not push to ${targetBranch} directly.`
     : "";
   return `You are in a git repository at ${targetDir}. There is a failing test. Read the source and test files, understand the bug, make the minimal fix, and run the test command until it passes.${pushInstructions}`;
 }
@@ -122,6 +122,23 @@ async function main() {
 
   console.log(pc.bold("[run-task] cloning target repo..."));
   run(`rm -rf "${targetDir}" && git clone --branch ${targetBranch} --single-branch ${targetRepoUrl} "${targetDir}"`, workDir, "inherit");
+
+  // Create the feature branch and set git identity so the agent cannot
+  // accidentally push to the protected target branch.
+  run(
+    `git config user.name "Daybreak Bot" && git config user.email "daybreak@example.com" && git checkout -b ${prBranch}`,
+    targetDir,
+    "inherit",
+  );
+
+  console.log(pc.bold("[run-task] config:"), {
+    protectedBranches: config.protectedBranches,
+    denylistPatterns: config.denylistPatterns,
+    maxTurns: config.maxTurns,
+    maxCostUsd: config.maxCostUsd,
+    prBranch,
+    targetBranch,
+  });
 
   const runner = new TaskRunner(config);
 

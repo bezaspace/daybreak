@@ -2,7 +2,7 @@
 
 **A living log of the architectural, product, and sequencing decisions behind the Daybreak roadmap.**
 
-> **Status:** Draft — updated with Roadmap v2.0  
+> **Status:** Updated through Phase 1 exit-criteria demo.  
 > **Started:** 2026-08-01
 
 ---
@@ -372,6 +372,36 @@
 - The local `TaskRunner` mode is retained for fast iteration and debugging agent behavior without E2B spend.
 
 ---
+
+## D33. Pre-checkout feature branch and denylist `bash` sensitive paths
+
+**Decision:** `run-task.ts` now creates the `daybreak/<task-id>` feature branch and sets the bot git identity before the Pi agent runs. `SafetyMiddleware` parses `bash` command tokens and blocks any command that references a sensitive path matching the denylist (e.g., `cat .env`).
+
+**Rationale:** The LLM occasionally issues `git push origin main` or `cat .env` despite prompt instructions. Enforcing branch and denylist at the tool level makes the guardrail independent of prompt compliance.
+
+**Consequences:**
+- The sandbox workspace is always on the feature branch, so `git push` without an explicit branch argument pushes the feature branch.
+- `.env`, `.env.*`, `*.pem`, `.ssh/**`, `.git/config`, and other denylist paths are blocked whether the agent uses the `read` tool or a `bash` command.
+
+## D34. Dashboard exit-criteria presets
+
+**Decision:** The React dashboard exposes two preset buttons: "Fix failing-sum test" (runs the `bezaspace/daybreak-target` fixture with default circuit breakers) and "Demo MAX_TURNS=3" (overrides `maxTurns` to demonstrate the circuit breaker).
+
+**Rationale:** A one-click demo makes the Phase 1 exit criteria repeatable and easy to verify without manually filling the repo/branch form.
+
+**Consequences:**
+- Presets set `repo` and `branch` and call `POST /api/tasks` with optional per-task `maxTurns`/`maxCostUsd`/`maxWallClockMinutes` overrides.
+- The UI shows live metrics and a circuit-breaker banner above the terminal.
+
+## D35. Target fixture repo with CI and a decoy `.env`
+
+**Decision:** The `bezaspace/daybreak-target` scratch repo contains a `.github/workflows/test.yml` that runs `npm test` on every PR and a decoy `.env` file. The workflow is intentionally simple so the agent-created PR gets an immediate green check.
+
+**Rationale:** The exit criteria require a PR that passes CI and a verified denylist. A small Node test fixture with a known one-line bug keeps the demo fast and deterministic.
+
+**Consequences:**
+- The decoy `.env` is not a real secret; it exists only to prove the agent never reads it.
+- CI must be kept minimal (`node --test`) so it passes quickly after the agent fixes `sum.js`.
 
 ## D30. Open questions that can change these decisions
 
