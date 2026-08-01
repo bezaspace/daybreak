@@ -7,6 +7,16 @@ An open-source, cloud-native developer agent platform that autonomously plans, w
 
 ---
 
+## Inspiration & Positioning
+
+Daybreak is inspired by the cloud coding agents built by **Devin AI** (Cognition) and **Cursor AI** — autonomous software engineers that plan, write, execute, test, and ship code inside isolated cloud sandboxes. Both are impressive products, but they are closed-source: their reasoning, tool latency, token cost, and decision lineage are not exposed to the user, and their state-rewinding capabilities (where they exist) are session-bound and not branchable into parallel attempts.
+
+Daybreak is an open-source replica of that class of system, built to understand and demonstrate the engineering behind autonomous coding-agent platforms. It takes the same core ideas — a sandboxed execution environment with shell, editor, and browser tools; a planner-executor reasoning loop; GitHub-native PR delivery and CI self-healing — and adds two things the closed-source originals do not offer: **full OpenTelemetry lineage** (every prompt, token, tool call, and latency is traceable) and **time-travel state branching** (rewind the cloud sandbox filesystem and agent state to any step, edit the context, and spawn a parallel attempt in a separate sandbox). The whole platform is also engineered to run on $0 of free-tier infrastructure.
+
+This is a learning and demonstration project, not a product to sell.
+
+---
+
 ## What It Is
 
 A user (or a GitHub Issue, or a PR review comment) gives Daybreak a task. The platform:
@@ -28,7 +38,7 @@ The differentiators that make this more than "another coding agent":
 
 ## Tech Stack
 
-- **Agent Kernel**: Pi SDK (`@earendil-works/pi-agent-core`) — minimalist, tree-structured TypeScript agent framework handling execution history, context-window compaction, and tool loops. Tools: `read`, `write`, `edit`, `bash`.
+- **Agent Kernel**: Pi SDK (`@earendil-works/pi-agent-core`) — minimalist, tree-structured TypeScript agent framework handling execution history, context-window compaction, and tool loops. Tools: `read`, `write`, `edit`, `bash`, `browser` (headless Chromium via Playwright — navigate pages, take screenshots, interact with DOM elements, and visually verify running web apps inside the sandbox).
 - **Control Plane & API**: Node.js / TypeScript on Cloudflare Workers & Pages — edge serverless gateway for webhook processing, session routing, and auth.
 - **UI**: React / Next.js on Cloudflare Pages / Vercel — real-time streaming terminal logs, code diff previews, and trace trees.
 - **Cloud Execution**: Daytona.io SDK — instant (<90ms), stateful Linux container sandboxes ($200 free compute credit, no credit card; snapshots + volumes included, which backs the time-travel filesystem rewind).
