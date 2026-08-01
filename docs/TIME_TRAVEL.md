@@ -4,24 +4,24 @@ Daybreak's headline time-travel feature has two parts: **rewinding the filesyste
 
 ## 1. Filesystem rewind
 
-### Daytona snapshots (preferred)
+### E2B snapshots (preferred)
 
-Daytona supports persistent, point-in-time snapshots of a sandbox:
+E2B supports persistent, point-in-time snapshots of a sandbox:
 
-- `Sandbox.createSnapshot(name, timeout)` captures the sandbox filesystem.
-- New sandboxes can start from a snapshot via `Daytona.create({ snapshot: "name" })`.
+- `sandbox.createSnapshot(name, timeout)` captures the sandbox filesystem.
+- New sandboxes can start from a snapshot via `Sandbox.create({ template: "<snapshot-id>" })`.
 - Container sandboxes produce **cold snapshots** (filesystem only) when stopped.
 - VM sandboxes can produce **hot snapshots** (`includeMemory: true`) while running.
 
 Feasibility for per-turn rewind:
 
 - Latency: unknown; needs measurement. A full snapshot per turn is likely too expensive for routine branching.
-- Cost: snapshots consume storage and snapshotting time; the free $200 credit would be consumed quickly if every turn is snapshotted.
+- Cost: snapshots consume storage and snapshotting time; E2B's free Hobby $100 in one-time credits would be consumed quickly if every turn is snapshotted.
 - Granularity: snapshots are whole-sandbox, not per-file. That is correct for reproducible rewinds but heavy.
 
 ### Git fallback
 
-If Daytona snapshots are too slow or expensive, the fallback is a git-heavy approach:
+If E2B snapshots are too slow or expensive, the fallback is a git-heavy approach:
 
 - After every tool call that mutates files, `git add` + `git commit` with a stable message containing the turn number.
 - Rewind by checking out the commit hash and resetting the working tree.
@@ -58,8 +58,8 @@ Open questions:
 
 1. Implement **git-based filesystem rewind** first — cheap, deterministic, and sufficient for most coding tasks.
 2. Add **JSONL session-store persistence** to capture per-turn agent state.
-3. Measure Daytona cold-snapshot latency and cost before relying on it for per-turn branching.
-4. Use Daytona snapshots only for coarse checkpoints (task start/end, expensive setup) and git for per-turn rewind.
+3. Measure E2B cold-snapshot latency and cost before relying on it for per-turn branching.
+4. Use E2B snapshots only for coarse checkpoints (task start/end, expensive setup) and git for per-turn rewind.
 
 ## 4. Phase 0 deliverable
 

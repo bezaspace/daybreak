@@ -9,7 +9,7 @@ Daybreak is designed to live on free-tier infrastructure. This document records 
 | **Upstash Redis** | 256 MB data, 500K commands/month, 10 GB bandwidth, 10K max commands/sec | Upstash free tier |
 | **Supabase** | 500 MB DB, 5 GB egress, 1 GB file storage, 50K MAU, 2 projects, 500K Edge Function invocations/month | Supabase free tier |
 | **Langfuse** | 50K units/month on Hobby plan | Langfuse pricing |
-| **Daytona** | $200 in free credits; vCPU $0.0504/h, RAM $0.0162/GiB/h, storage first 5 GB free then $0.000108/GiB/h | Daytona pricing |
+| **E2B** | Hobby: $100 in one-time credits; paid vCPU/RAM/storage only after credits consumed | E2B pricing |
 | **Groq** | 30 RPM, 6K TPM, 1K RPD for most models | Groq docs |
 | **OpenRouter free** | 50 requests/day, 20 RPM | OpenRouter docs |
 
@@ -28,10 +28,10 @@ Free providers are used wherever possible. For paid fallbacks, the target model 
 - Free quota: **500K commands/month** → ~1,250 tasks/month.
 - **Guardrail:** `MAX_TURNS` and stream batching limit command volume.
 
-### Daytona
-- A sandbox running 1 vCPU + 2 GiB RAM costs ~$0.083/h.
-- `$200` credits ≈ **2,400 sandbox-hours**.
-- A single task that runs for 5 minutes costs ~$0.0069.
+### E2B
+- The free Hobby tier provides $100 in one-time credits before any paid usage begins.
+- After credits are consumed, sandbox compute (vCPU/RAM) and snapshot storage are metered; for current rates see https://e2b.dev/pricing.
+- A single short task that runs for ~1 minute costs a small fraction of a cent, but Node 22 installation and large snapshots are the main cost drivers to measure.
 - Time-travel snapshots are the main wildcard: a full filesystem snapshot per turn is expensive, so Phase 4 should benchmark snapshot size and latency before enabling per-turn snapshots.
 
 ### Supabase / Langfuse

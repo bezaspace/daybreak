@@ -9,7 +9,7 @@ Daybreak needs several credentials across its lifecycle. This document explains 
 | Local development (Phase 0) | Running the agent spike and evals | `.env` file loaded by `dotenv` |
 | CI (GitHub Actions) | Lint, typecheck, tests | Repository `Secrets` / `Variables` |
 | Cloudflare Workers | Control plane, GitHub App, queue, UI | `wrangler secret` / `wrangler.toml` vars (non-sensitive only) |
-| Daytona | Sandbox API key | Cloudflare secret, passed to the sandbox at creation time |
+| E2B | Sandbox API key | Cloudflare secret, passed to the sandbox at creation time |
 | Supabase | Database, Edge Functions | Supabase Vault / project API keys, stored in Cloudflare secrets |
 
 ## Secret inventory
@@ -18,9 +18,9 @@ Daybreak needs several credentials across its lifecycle. This document explains 
 - `LLM_API_KEY` and `LLM_FALLBACK_API_KEY` — primary and fallback OpenAI-compatible API keys.
 - Rotate keys through the provider dashboard. Use `LLM_FALLBACK_*` so the agent can degrade gracefully on rate limits.
 
-### Daytona
-- `DAYTONA_API_KEY` and `DAYTONA_API_URL` — create/destroy sandboxes.
-- The agent should never read these from inside a sandbox. The control plane injects a short-lived sandbox API key only when spawning a workspace.
+### E2B
+- `E2B_API_KEY` — create/destroy sandboxes.
+- The agent should never read this from inside a sandbox. The control plane injects a short-lived sandbox API key only when spawning a workspace.
 
 ### GitHub
 - `GITHUB_APP_ID`, `GITHUB_WEBHOOK_SECRET` — GitHub App configuration.

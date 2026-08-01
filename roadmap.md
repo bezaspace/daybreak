@@ -50,11 +50,11 @@ Progress is measured by the completion of demoable vertical slices and objective
 
 ## 3. Phase 0 — Foundation, Safety Baseline & Feasibility Spikes
 
-**Goal:** Stand up the repo, prove the agent kernel runs end-to-end against a free OpenAI-compatible provider, establish safety guardrails, an eval harness, and a cost/quotabudget model **before** any cloud plumbing or UI is built. Also prove the two riskiest headline primitives (Pi session serialization and Daytona snapshot rewind) before committing to them.
+**Goal:** Stand up the repo, prove the agent kernel runs end-to-end against a free OpenAI-compatible provider, establish safety guardrails, an eval harness, and a cost/quotabudget model **before** any cloud plumbing or UI is built. Also prove the two riskiest headline primitives (Pi session serialization and E2B snapshot rewind) before committing to them.
 
 - [x] 3.1. Initialize `daybreak` monorepo with pnpm workspaces: `packages/control-plane`, `packages/agent-runner`, `packages/ui`, `packages/shared`.
 - [x] 3.2. Create `ROADMAP.md` (this document) and `decisions.md`.
-- [x] 3.3. Create `.env.example` documenting `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `LLM_FALLBACK_BASE_URL`, `LLM_FALLBACK_API_KEY`, `LLM_FALLBACK_MODEL`, Daytona, Upstash, Supabase, Langfuse, and GitHub credentials.
+- [x] 3.3. Create `.env.example` documenting `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `LLM_FALLBACK_BASE_URL`, `LLM_FALLBACK_API_KEY`, `LLM_FALLBACK_MODEL`, E2B, Upstash, Supabase, Langfuse, and GitHub credentials.
 - [x] 3.4. Pi SDK spike: standalone TypeScript script using `@earendil-works/pi-agent-core` that wires `read`/`write`/`edit`/`bash` and drives a multi-turn loop against an OpenAI-compatible provider.
 - [x] 3.5. **Safety baseline (Phase 0, not Phase 6):**
   - [x] 3.5.1. Tool middleware denylist: block `read`/`write`/`edit` on `.env`, `*.pem`, `.ssh/*`, `.git/config`, `id_*`, `*secret*`, `*token*` unless explicitly approved.
@@ -65,12 +65,12 @@ Progress is measured by the completion of demoable vertical slices and objective
 - [x] 3.7. **Cost and quota-budget model:** Produce a living budget document (`docs/COST_BUDGET.md`) that models:
   - LLM tokens per turn and per task against chosen free-tier provider(s).
   - Upstash Redis free-tier 10,000 commands/day and Supabase 500MB/500k row limits.
-  - Daytona snapshot frequency, latency, and credit consumption for time-travel.
+  - E2B snapshot frequency, latency, and credit consumption for time-travel.
   - Langfuse free trace tier (50,000 traces/month).
 - [x] 3.8. **Secrets management strategy:** No secrets in code. Local: `.env` + 1Password/direnv or similar. Cloud: Cloudflare Worker secrets + Supabase Vault. GitHub App private key stored as a Cloudflare secret/Worker secret. Document rotation policy.
 - [x] 3.9. **Time-travel feasibility spike (critical):**
   - [x] 3.9.1. Prove Pi session state can be serialized to a deterministic blob, reloaded into a fresh process, and optionally branched/forked. If `pi-agent-core` does not expose this, identify the minimal wrapper or patch needed.
-  - [x] 3.9.2. Measure `daytona.snapshot()` latency and cost on a small workspace; determine if per-turn snapshots are viable or if a per-turn `git commit` + dependency-cache strategy is required.
+  - [x] 3.9.2. Measure E2B `sandbox.createSnapshot()` latency and cost on a small workspace; determine if per-turn snapshots are viable or if a per-turn `git commit` + dependency-cache strategy is required.
   - [x] 3.9.3. Document the chosen checkpoint strategy in `docs/TIME_TRAVEL.md` before Phase 4 begins. If feasibility fails, downgrade time-travel to git-based checkpoints.
 - [x] 3.10. Set up CI: `pnpm install`, lint, typecheck, unit tests, and the eval harness on every push.
 - [x] 3.11. Confirm `pi-agent-core` (v0.83.0+) installs cleanly and its tool-registration and context-compaction APIs are understood.
@@ -80,7 +80,7 @@ Progress is measured by the completion of demoable vertical slices and objective
   - `pnpm spike` clones a toy repo, runs its tests, applies a one-line fix, re-runs tests until green, and prints a token/latency/cost summary table.
   - Attempting to read `.env` is blocked by the denylist.
   - `MAX_TURNS` is enforced.
-  - A feasibility report for time-travel serialization and Daytona snapshots is written and reviewed.
+  - A feasibility report for time-travel serialization and E2B snapshots is written and reviewed.
 
 ---
 
@@ -88,9 +88,9 @@ Progress is measured by the completion of demoable vertical slices and objective
 
 **Goal:** The full Daybreak loop, demoable end-to-end locally, with safety, evals, and cost tracking already in place.
 
-- [ ] 4.1. **Control plane:** Local Node.js/TypeScript server (`packages/control-plane`), structured for Cloudflare Worker migration. `/api/tasks` POST handler that authenticates, creates a Supabase session row, invokes Daytona, and streams events to Upstash Redis.
-- [ ] 4.2. **Agent runner:** Runs inside the Daytona sandbox. Wraps Pi SDK, clones the target repo, configures bot committer, checks out a feature branch, iterates (`read`/`bash`/`edit`), pushes, opens a PR via GitHub API (PAT for MVP; installation tokens later).
-- [ ] 4.3. **Sandbox provisioning:** Daytona TypeScript SDK `daytona.create()` from a default snapshot; workspace prep script installs git, node, pnpm, Python, and common build tools.
+- [ ] 4.1. **Control plane:** Local Node.js/TypeScript server (`packages/control-plane`), structured for Cloudflare Worker migration. `/api/tasks` POST handler that authenticates, creates a Supabase session row, invokes E2B, and streams events to Upstash Redis.
+- [ ] 4.2. **Agent runner:** Runs inside the E2B sandbox. Wraps Pi SDK, clones the target repo, configures bot committer, checks out a feature branch, iterates (`read`/`bash`/`edit`), pushes, opens a PR via GitHub API (PAT for MVP; installation tokens later).
+- [ ] 4.3. **Sandbox provisioning:** E2B TypeScript SDK `Sandbox.create()` from the `base` template; workspace prep script installs git, Node 22, pnpm, Python, and common build tools.
 - [ ] 4.4. **Real-time stream:** Sandbox publishes `stdout`/`stderr`/tool-events to an Upstash Redis pub/sub channel; local UI subscribes. Monitor Upstash command consumption against the quota model.
 - [ ] 4.5. **UI:** Local React + Vite dev server. Task trigger form, live terminal panel, PR link, basic task list, and approval-gate buttons for destructive actions.
 - [ ] 4.6. **Persistence:** Supabase Postgres. `sessions`, `tasks`, `events`, `checkpoints` (stub) tables.
@@ -98,7 +98,7 @@ Progress is measured by the completion of demoable vertical slices and objective
 - [ ] 4.8. **Context compaction:** Integrate Pi's compaction settings and the hard `MAX_TURNS` cap from Phase 0.
 - [ ] 4.9. **Browser/Playwright tool:** Integrate headless Chromium inside the sandbox so the agent can visually verify running web apps and interact with DOM elements; stream screenshots to the UI.
 - [ ] 4.10. **PR delivery path:** branch push + `POST /repos/{owner}/{repo}/pulls`.
-- [ ] 4.11. **Control channel:** Control plane issues commands over Daytona's process exec API; sandbox pushes events to Upstash.
+- [ ] 4.11. **Control channel:** Control plane issues commands over E2B's process exec API; sandbox pushes events to Upstash.
 - [ ] 4.12. **UI WebSocket:** Local server holds the client connection, pulls from Upstash REST, relays to browser.
 - [ ] 4.13. Run the Phase 0 eval harness against this local MVP and record wall-clock time, token count, and $-cost per task.
 - [ ] 4.14. **Exit criteria:** From the local dashboard, click "Fix failing test on repo X" → watch live terminal and browser stream → a PR appears on GitHub. The PR contains a real fix that passes CI, no `.env` was read, the branch is not `main`, and `MAX_TURNS`/`MAX_COST` are enforced.
@@ -146,7 +146,7 @@ Progress is measured by the completion of demoable vertical slices and objective
 **Goal:** Rewind the agent's execution tree to any step, edit the context or prompt, and spawn a parallel attempt branch in a separate sandbox. This phase depends on the feasibility report from Phase 0.
 
 - [ ] 7.1. **Checkpoint model:** A checkpoint is `{ turn, timestamp, piStateRef, fsSnapshotId, parentCheckpointId }` stored in Supabase. One checkpoint per turn.
-- [ ] 7.2. **Filesystem rewind:** Use the strategy proven in Phase 0 — either Daytona snapshots per turn or a per-turn `git commit` + dependency-cache fallback.
+- [ ] 7.2. **Filesystem rewind:** Use the strategy proven in Phase 0 — either E2B snapshots per turn or a per-turn `git commit` + dependency-cache fallback.
 - [ ] 7.3. **Agent-state rewind:** Serialize Pi session at each checkpoint and reload/fork from `piStateRef`.
 - [ ] 7.4. **Parallel attempt branching:** Fork the sandbox and fork the Pi session from checkpoint `N`.
 - [ ] 7.5. **Branch UI:** In the dashboard. A tree visualization of checkpoints. User clicks a node, edits context/instruction, clicks "Branch". A new sandbox is spun from the snapshot, Pi state is restored and forked, and the new branch begins executing live.
@@ -195,17 +195,17 @@ Progress is measured by the completion of demoable vertical slices and objective
 
 ## 10. Phase 7 — Cloudflare Deployment & v1.0 Release
 
-**Goal:** Take the fully functional, locally-tested codebase and deploy it to the $0 free-tier cloud infrastructure (Cloudflare Workers/Pages, Upstash, Supabase, Langfuse, Daytona).
+**Goal:** Take the fully functional, locally-tested codebase and deploy it to the $0 free-tier cloud infrastructure (Cloudflare Workers/Pages, Upstash, Supabase, Langfuse, E2B).
 
 - [ ] 10.1. **Control Plane Migration:** Adapt the local Node.js control plane to run natively on Cloudflare Workers. Move long-lived WebSocket/queue handling to Durable Objects or Cloudflare Queues; replace Node-only APIs with Web standard APIs.
-- [ ] 10.2. **Architecture audit:** Confirm no long-running agent work executes inside a Worker invocation. Agent orchestration is enqueue + signal; Daytona containers do the heavy work.
+- [ ] 10.2. **Architecture audit:** Confirm no long-running agent work executes inside a Worker invocation. Agent orchestration is enqueue + signal; E2B containers do the heavy work.
 - [ ] 10.3. **UI Deployment:** Deploy React + Vite app to Cloudflare Pages. Ensure Edge compatibility for any API routes.
 - [ ] 10.4. **Environment Configuration:** Move all local `.env` secrets to Cloudflare Worker secrets and Upstash/Supabase dashboards.
 - [ ] 10.5. **Production Webhooks:** Point GitHub App webhook URL to the deployed Cloudflare Worker URL.
 - [ ] 10.6. **Documentation:** `DEPLOYMENT.md` guide, architecture diagrams, operator runbook, and v1.0 release notes.
 - [ ] 10.7. Set up Durable Objects for the WebSocket bridge between Upstash Redis and the browser.
-- [ ] 10.8. Configure `wrangler.toml` with all bindings (Supabase URL, Upstash REST URL, GitHub App ID, Langfuse keys, Daytona config).
-- [ ] 10.9. Run end-to-end production test: trigger via GitHub Issue → Cloudflare Worker → Daytona → PR.
+- [ ] 10.8. Configure `wrangler.toml` with all bindings (Supabase URL, Upstash REST URL, GitHub App ID, Langfuse keys, E2B config).
+- [ ] 10.9. Run end-to-end production test: trigger via GitHub Issue → Cloudflare Worker → E2B → PR.
 - [ ] 10.10. **Exit criteria:** The entire Daybreak platform is accessible via a public URL. A GitHub issue triggers the cloud-hosted agent, which opens a PR, with live logs streaming to the deployed dashboard. Total monthly operating cost = $0 under the modeled free-tier quotas.
 
 ---
@@ -224,7 +224,7 @@ Progress is measured by the completion of demoable vertical slices and objective
 ## 12. Open Questions & Risks
 
 - Does `pi-agent-core` expose true session serialization and fork primitives, or do we need to build a wrapper?
-- What is the real latency and credit cost of per-turn Daytona snapshots at the task volumes we expect?
+- What is the real latency and credit cost of per-turn E2B snapshots at the task volumes we expect?
 - Which free-tier OpenAI-compatible provider gives the best success-rate/availability for coding tasks, and what are its exact rate limits?
 - Can Cloudflare Workers free tier handle webhook fan-in and Durable Object usage without hitting limits?
 - How do we sanitize tool output so an adversarial repo cannot exfiltrate secrets even if the denylist is bypassed?
@@ -234,6 +234,6 @@ Progress is measured by the completion of demoable vertical slices and objective
 ## 13. Reference
 
 - Pi SDK: https://github.com/earendil-works/pi (`@earendil-works/pi-agent-core`, MIT, by Mario Zechner)
-- Daytona: https://www.daytona.io/
+- E2B: https://e2b.dev
 - OpenTelemetry: https://opentelemetry.io/
 - Langfuse: https://langfuse.com/

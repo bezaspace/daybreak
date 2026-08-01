@@ -5,7 +5,7 @@ import { writeFileSync } from "node:fs";
 import pc from "picocolors";
 import { TaskRunner } from "./session.js";
 
-const workDir = process.env.WORK_DIR || "/home/daytona";
+const workDir = process.env.WORK_DIR || "/tmp";
 const targetRepoUrl = process.env.TARGET_REPO_URL;
 const targetBranch = process.env.TARGET_BRANCH || "main";
 const targetDir = process.env.TARGET_DIR || `${workDir}/target`;
@@ -16,7 +16,7 @@ const gitAskpassPath = process.env.GIT_ASKPASS || `${workDir}/.git-askpass.sh`;
 const defaultPrompt = `You are in a git repository at ${targetDir}. There is a failing test. Read the source and test files, understand the bug, make the minimal fix, and run the test command until it passes.${pushAfterFix ? ` Then stage the change with "git add -A", commit with "git -c user.name='Daybreak Bot' -c user.email='daybreak@example.com' commit -m 'fix: <concise message>'", and push to origin ${targetBranch}. Do not create any new branches.` : ""}`;
 
 const prompt = process.env.TASK_PROMPT || defaultPrompt;
-const systemPrompt = process.env.TASK_SYSTEM_PROMPT || `You are Daybreak, an autonomous coding agent running in a Daytona sandbox. Investigate, fix, verify, then${pushAfterFix ? " commit and push" : " report the fix"}.`;
+const systemPrompt = process.env.TASK_SYSTEM_PROMPT || `You are Daybreak, an autonomous coding agent running in an E2B sandbox. Investigate, fix, verify, then${pushAfterFix ? " commit and push" : " report the fix"}.`;
 
 function writeGitAskpassScript(path: string) {
   const script = `#!/bin/bash

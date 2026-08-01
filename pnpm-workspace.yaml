@@ -9,3 +9,4 @@ minimumReleaseAgeExclude:
   - '@daytona/api-client@0.203.0'
   - '@daytona/sdk@0.203.0'
   - '@daytona/toolbox-api-client@0.203.0'
+  - e2b@2.37.0

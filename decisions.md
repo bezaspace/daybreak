@@ -55,7 +55,7 @@
 
 **Consequences:**
 - No Node-only modules (`fs`, `child_process`, `http` server) in core control-plane code.
-- Long-running tasks must not live inside a Worker invocation; they must be offloaded to Daytona sandboxes and triggered via durable queues/Durable Objects.
+- Long-running tasks must not live inside a Worker invocation; they must be offloaded to E2B sandboxes and triggered via durable queues/Durable Objects.
 
 ---
 
@@ -66,20 +66,21 @@
 **Rationale:** Free tier, edge deployment, and native integration with the local-first code in D4.
 
 **Consequences:**
-- We must respect Workers free-tier CPU/time limits; heavy work belongs in Daytona.
+- We must respect Workers free-tier CPU/time limits; heavy work belongs in E2B.
 - WebSocket/streaming to the browser requires Durable Objects.
 - We need `wrangler.toml` bindings for all secrets and external services.
 
 ---
 
-## D6. Daytona sandboxes for execution
+## D6. E2B sandboxes for execution
 
-**Decision:** Use Daytona SDK-provisioned Linux containers as the agent execution environment.
+**Decision:** Use E2B SDK-provisioned Linux containers as the agent execution environment.
 
-**Rationale:** Daytona offers stateful sandboxes, sub-90ms cold starts, snapshot support, and a free-tier credit program, which maps directly to the time-travel feature.
+**Rationale:** E2B sandboxes have unrestricted outbound internet by default, which is required for the OpenAI-compatible Kilo.ai gateway. They support full Linux command execution, filesystem operations, git, snapshots, and a free Hobby tier with $100 in one-time credits. This replaces Daytona, whose sandbox network only allows a fixed allow-list of LLM providers and reset `api.kilo.ai`.
 
 **Consequences:**
-- We depend on Daytona's API stability and free-tier credit availability.
+- We depend on E2B's API stability and free-tier credit availability.
+- The default `base` template ships Node 20; the runner installs Node 22 at sandbox startup to match the bundled `undici`/`pi-agent-core` runtime.
 - Per-turn snapshots for time-travel may be expensive or slow; we must measure and fall back if needed.
 
 ---
@@ -136,7 +137,7 @@
 
 **Decision:** Time-travel is the headline feature, but it is deliberately de-risked through a Phase 0 feasibility spike before Phase 4 begins.
 
-**Rationale:** The two primitives (Pi session serialization and Daytona per-turn snapshots) are unproven. Committing to a full Phase 4 without proof risks a major pivot.
+**Rationale:** The two primitives (Pi session serialization and E2B per-turn snapshots) are unproven. Committing to a full Phase 4 without proof risks a major pivot.
 
 **Alternatives considered:**
 - Build it as Phase 1: too risky; would block the MVP.
@@ -144,13 +145,13 @@
 
 **Consequences:**
 - If Pi serialization is not available, we build a wrapper or use git-per-turn checkpoints.
-- If Daytona snapshots are too slow/expensive, we use a per-turn `git commit` strategy with a dependency cache.
+- If E2B snapshots are too slow/expensive, we use a per-turn `git commit` strategy with a dependency cache.
 
 ---
 
 ## D12. Filesystem rewind: snapshots first, git fallback
 
-**Decision:** Prefer Daytona filesystem snapshots for rewinding, but retain a per-turn `git commit` + dependency-cache fallback.
+**Decision:** Prefer E2B filesystem snapshots for rewinding, but retain a per-turn `git commit` + dependency-cache fallback.
 
 **Rationale:** Snapshots are the cleanest conceptual match for time-travel, but cost and latency may make them impractical at turn granularity.
 
@@ -324,7 +325,7 @@
 
 ## D28. Language/runtime support in sandbox image
 
-**Decision:** Pre-install git, Node.js, pnpm, Python, and common build tools in the default Daytona workspace image.
+**Decision:** Pre-install git, Node.js, pnpm, Python, and common build tools in the default E2B workspace image.
 
 **Rationale:** Daybreak should handle common repo types out of the box. The Pi SDK is TypeScript, but target repos may be Python, JavaScript, etc.
 
@@ -344,7 +345,7 @@
 ## D30. Open questions that can change these decisions
 
 - Can `pi-agent-core` serialize and fork sessions cleanly?
-- What is the real cost and latency of per-turn Daytona snapshots?
+- What is the real cost and latency of per-turn E2B snapshots?
 - Which free LLM provider gives the best coding-task success rate within its rate limits?
 - Will Cloudflare Workers free tier support the expected webhook and Durable Object load?
 - How do we prevent prompt-injection or sandbox-escape attacks from malicious repositories?

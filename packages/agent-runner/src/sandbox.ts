@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { loadConfig } from "@daybreak/shared";
-import { Daytona } from "@daytona/sdk";
+import { CommandExitError, Sandbox } from "e2b";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import pc from "picocolors";
 
@@ -8,13 +9,21 @@ function getArg(name: string): string | undefined {
   return process.argv.find((arg) => arg.startsWith(`${name}=`))?.split("=")[1];
 }
 
+const NODE22_URL = "https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-x64.tar.xz";
+const WORK_DIR = "/home/user";
+const NODE_DIR = `${WORK_DIR}/.node`;
+const REMOTE_PATH = `${WORK_DIR}/run-task.cjs`;
+const SETUP_TIMEOUT_MS = 120_000;
+const COMMAND_TIMEOUT_MS = 20 * 60 * 1000;
+const SANDBOX_TIMEOUT_MS = 30 * 60 * 1000;
+
 async function main() {
   const config = loadConfig();
   const targetRepo = getArg("--repo") || "https://github.com/bezaspace/daybreak-target";
   const targetBranch = getArg("--branch") || "main";
 
-  if (!config.daytonaApiKey || !config.daytonaApiUrl) {
-    console.error(pc.red("DAYTONA_API_KEY and DAYTONA_API_URL are required"));
+  if (!config.e2bApiKey) {
+    console.error(pc.red("E2B_API_KEY is required"));
     process.exit(1);
   }
   if (!config.githubToken) {
@@ -23,21 +32,17 @@ async function main() {
   }
 
   const bundlePath = resolve(process.cwd(), "dist/run-task.cjs");
-  const remotePath = "/home/daytona/run-task.cjs";
+  const bundle = readFileSync(bundlePath, "utf8");
 
-  const daytona = new Daytona({
-    apiKey: config.daytonaApiKey,
-    apiUrl: config.daytonaApiUrl,
-    target: config.daytonaTarget,
-  });
-
-  console.log(pc.bold("[sandbox] creating Daytona sandbox..."));
-  const sandbox = await daytona.create({
-    language: "typescript",
-    autoStopInterval: 0,
-    ttlMinutes: 120,
-    envVars: {
-      PATH: "/usr/local/share/nvm/current/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+  console.log(pc.bold("[sandbox] creating E2B sandbox..."));
+  const sandbox = await Sandbox.create({
+    template: "base",
+    allowInternetAccess: true,
+    timeoutMs: SANDBOX_TIMEOUT_MS,
+    apiKey: config.e2bApiKey,
+    validateApiKey: false,
+    envs: {
+      PATH: `${NODE_DIR}/bin:/usr/local/bin:/usr/bin:/bin`,
       LLM_PROVIDER: config.llm.provider,
       LLM_BASE_URL: config.llm.baseUrl,
       LLM_API_KEY: config.llm.apiKey,
@@ -49,7 +54,8 @@ async function main() {
       GITHUB_TOKEN: config.githubToken,
       TARGET_REPO_URL: targetRepo,
       TARGET_BRANCH: targetBranch,
-      TARGET_DIR: "/home/daytona/target",
+      TARGET_DIR: `${WORK_DIR}/target`,
+      WORK_DIR,
       AUTO_APPROVE: "true",
       PUSH_AFTER_FIX: "true",
       MAX_TURNS: String(config.maxTurns),
@@ -61,63 +67,48 @@ async function main() {
     },
   });
 
-  console.log(pc.bold(`[sandbox] created ${sandbox.id} (${sandbox.state ?? "unknown state"})`));
+  console.log(pc.bold(`[sandbox] created ${sandbox.sandboxId}`));
 
-  let heartbeat: NodeJS.Timeout | undefined;
   try {
-    await sandbox.process.createSession("daybreak-task");
+    console.log(pc.bold("[sandbox] installing Node 22..."));
+    const setup = await sandbox.commands.run(
+      `mkdir -p ${NODE_DIR} && curl -fsSL ${NODE22_URL} | tar -xJf - -C ${NODE_DIR} --strip-components=1 && ${NODE_DIR}/bin/node --version`,
+      { timeoutMs: SETUP_TIMEOUT_MS },
+    );
+    if (setup.exitCode !== 0) {
+      throw new Error(`Node 22 install failed:\n${setup.stdout}\n${setup.stderr}`);
+    }
+    process.stdout.write(setup.stdout.trim() + "\n");
 
     console.log(pc.bold("[sandbox] uploading agent bundle..."));
-    await sandbox.fs.uploadFile(bundlePath, remotePath);
+    await sandbox.files.write(REMOTE_PATH, bundle);
 
     console.log(pc.bold("[sandbox] running agent in sandbox..."));
-    heartbeat = setInterval(() => process.stdout.write("."), 3000);
+    const handle = await sandbox.commands.run(`${NODE_DIR}/bin/node ${REMOTE_PATH}`, {
+      background: true,
+      timeoutMs: COMMAND_TIMEOUT_MS,
+      onStdout: (data: string) => {
+        process.stdout.write(data);
+      },
+      onStderr: (data: string) => {
+        process.stderr.write(data);
+      },
+    });
 
-    const startResponse = await sandbox.process.executeSessionCommand(
-      "daybreak-task",
-      { command: `node ${remotePath}`, runAsync: true },
-      1200,
-    );
-    const cmdId = startResponse.cmdId;
-    if (!cmdId) {
-      throw new Error("No command ID returned for async session command");
-    }
-
-    let printedOutput = 0;
-    let printedStderr = 0;
-    let completed = false;
-
-    while (!completed) {
-      await new Promise((res) => setTimeout(res, 5000));
-
-      const [cmd, logs] = await Promise.all([
-        sandbox.process.getSessionCommand("daybreak-task", cmdId),
-        sandbox.process.getSessionCommandLogs("daybreak-task", cmdId),
-      ]);
-
-      if (logs.output && logs.output.length > printedOutput) {
-        process.stdout.write(logs.output.slice(printedOutput));
-        printedOutput = logs.output.length;
-      }
-      if (logs.stderr && logs.stderr.length > printedStderr) {
-        process.stderr.write(logs.stderr.slice(printedStderr));
-        printedStderr = logs.stderr.length;
-      }
-
-      if (typeof cmd.exitCode === "number") {
-        completed = true;
-        process.exitCode = cmd.exitCode;
-        console.log(pc.bold("\n[sandbox] exit:"), cmd.exitCode);
-      }
-    }
+    const result = await handle.wait();
+    process.exitCode = result.exitCode;
+    console.log(pc.bold("\n[sandbox] exit:"), result.exitCode);
   } catch (error) {
+    if (error instanceof CommandExitError) {
+      process.exitCode = error.exitCode;
+    } else {
+      process.exitCode = 1;
+    }
     console.error(pc.red("[sandbox] error:"), error);
-    process.exitCode = 1;
   } finally {
-    if (heartbeat) clearInterval(heartbeat);
     console.log(pc.bold("[sandbox] deleting sandbox..."));
     try {
-      await sandbox.delete();
+      await sandbox.kill();
     } catch {
       // ignore cleanup errors
     }
