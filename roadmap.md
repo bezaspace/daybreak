@@ -18,15 +18,15 @@ The differentiator is the *combination* and the *transparency thesis*, not the c
 
 ## 1. Guiding Principles
 
-- [ ] 1.1. **Safety before features.** Guardrails, branch protection, sensitive-file denylisting, and resource/cost circuit breakers are built in Phase 0 and are non-negotiable for any loop that can `write`, `bash`, `git push`, or open PRs.
+- [x] 1.1. **Safety before features.** Guardrails, branch protection, sensitive-file denylisting, and resource/cost circuit breakers are built in Phase 0 and are non-negotiable for any loop that can `write`, `bash`, `git push`, or open PRs.
 - [ ] 1.2. **Local-first development, cloud-ready architecture.** All code is written, tested, and demoed locally first. Control-plane code is constrained to Cloudflare Workers/Pages-compatible APIs from the start so cloud deployment is a configuration step, not a rewrite.
 - [ ] 1.3. **Vertical slice first, differentiators later.** The MVP (Phase 1) proves the end-to-end loop is demoable on its own before observability, GitHub triggers, time-travel, or CI self-healing.
 - [ ] 1.4. **Every milestone is demoable on its own.** No phase exists only to enable a later phase; each ships a visible capability.
 - [ ] 1.5. **Track cost, latency, token usage, and success rate from day one.** The $0 thesis is a continuously-verified invariant, not an afterthought.
 - [ ] 1.6. **Provider-agnostic intelligence with fallback.** The agent kernel talks to any OpenAI-compatible endpoint and degrades gracefully to a fallback provider if the primary is rate-limited or down.
 - [ ] 1.7. **Transparency by construction.** Observability is not bolted on — it is a first-class layer that every subsequent phase emits into.
-- [ ] 1.8. **Evaluations are a feature, not an afterthought.** A repeatable eval/benchmark harness is created in Phase 0 and runs in CI for every subsequent phase.
-- [ ] 1.9. **Fail safe, not fail fast.** Resource circuit breakers, sensitive-file denylists, human approval gates for destructive actions, and branch-protection locks are first-class.
+- [x] 1.8. **Evaluations are a feature, not an afterthought.** A repeatable eval/benchmark harness is created in Phase 0 and runs in CI for every subsequent phase.
+- [x] 1.9. **Fail safe, not fail fast.** Resource circuit breakers, sensitive-file denylists, human approval gates for destructive actions, and branch-protection locks are first-class.
 - [ ] 1.10. **AI-Agent Friendly Codebase.** Highly modular, strongly typed, and extensively documented to provide maximum context to the AI agents doing the building.
 
 ---
@@ -37,7 +37,7 @@ Progress is measured by the completion of demoable vertical slices and objective
 
 | Phase | Name | Ships |
 |-------|------|-------|
-| [ ] 0 | Foundation, Safety Baseline & Feasibility Spikes | Agent loop + guardrails + eval harness + cost/quotabudget model + time-travel feasibility proof |
+| [x] 0 | Foundation, Safety Baseline & Feasibility Spikes | Agent loop + guardrails + eval harness + cost/quotabudget model + time-travel feasibility proof |
 | [ ] 1 | Safe Local MVP Vertical Slice | End-to-end dashboard → sandbox → PR with safety, streaming, browser tool, and approval gates |
 | [ ] 2 | Observability, Cost Control & Provider Resilience | OTel/Langfuse trace tree, cost dashboard, provider fallback |
 | [ ] 3 | GitHub-Native Triggers & Review Loop | GitHub App, issue/PR-comment triggers, scoped 1h tokens, review-loop listener |
@@ -52,31 +52,31 @@ Progress is measured by the completion of demoable vertical slices and objective
 
 **Goal:** Stand up the repo, prove the agent kernel runs end-to-end against a free OpenAI-compatible provider, establish safety guardrails, an eval harness, and a cost/quotabudget model **before** any cloud plumbing or UI is built. Also prove the two riskiest headline primitives (Pi session serialization and Daytona snapshot rewind) before committing to them.
 
-- [ ] 3.1. Initialize `daybreak` monorepo with pnpm workspaces: `packages/control-plane`, `packages/agent-runner`, `packages/ui`, `packages/shared`.
-- [ ] 3.2. Create `ROADMAP.md` (this document) and `decisions.md`.
-- [ ] 3.3. Create `.env.example` documenting `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `LLM_FALLBACK_BASE_URL`, `LLM_FALLBACK_API_KEY`, `LLM_FALLBACK_MODEL`, Daytona, Upstash, Supabase, Langfuse, and GitHub credentials.
-- [ ] 3.4. Pi SDK spike: standalone TypeScript script using `@earendil-works/pi-agent-core` that wires `read`/`write`/`edit`/`bash` and drives a multi-turn loop against an OpenAI-compatible provider.
-- [ ] 3.5. **Safety baseline (Phase 0, not Phase 6):**
-  - [ ] 3.5.1. Tool middleware denylist: block `read`/`write`/`edit` on `.env`, `*.pem`, `.ssh/*`, `.git/config`, `id_*`, `*secret*`, `*token*` unless explicitly approved.
-  - [ ] 3.5.2. Branch-protection lock: agent refuses to commit, push, or reset `main`/`master` or any protected branch; every task must use a feature branch.
-  - [ ] 3.5.3. Resource circuit breakers: default `MAX_TURNS=40`, `MAX_WALL_CLOCK_MINUTES=20`, `MAX_COST_USD=0.50` per task. Exceeding any limit stops the task gracefully with a final trace.
-  - [ ] 3.5.4. Human approval gate: pause before destructive actions (`git push`, `git push --force`, branch deletion, `rm -rf`, opening a PR, force-merging) and require UI/webhook approval.
-- [ ] 3.6. **Eval harness:** Define a `packages/evals` package with a small benchmark set (a toy repo, a real-ish one-line bug, a failing test). Each phase must be able to run `pnpm eval` and report pass/fail, token count, cost, and wall-clock time.
-- [ ] 3.7. **Cost and quota-budget model:** Produce a living budget document (`docs/COST_BUDGET.md`) that models:
+- [x] 3.1. Initialize `daybreak` monorepo with pnpm workspaces: `packages/control-plane`, `packages/agent-runner`, `packages/ui`, `packages/shared`.
+- [x] 3.2. Create `ROADMAP.md` (this document) and `decisions.md`.
+- [x] 3.3. Create `.env.example` documenting `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `LLM_FALLBACK_BASE_URL`, `LLM_FALLBACK_API_KEY`, `LLM_FALLBACK_MODEL`, Daytona, Upstash, Supabase, Langfuse, and GitHub credentials.
+- [x] 3.4. Pi SDK spike: standalone TypeScript script using `@earendil-works/pi-agent-core` that wires `read`/`write`/`edit`/`bash` and drives a multi-turn loop against an OpenAI-compatible provider.
+- [x] 3.5. **Safety baseline (Phase 0, not Phase 6):**
+  - [x] 3.5.1. Tool middleware denylist: block `read`/`write`/`edit` on `.env`, `*.pem`, `.ssh/*`, `.git/config`, `id_*`, `*secret*`, `*token*` unless explicitly approved.
+  - [x] 3.5.2. Branch-protection lock: agent refuses to commit, push, or reset `main`/`master` or any protected branch; every task must use a feature branch.
+  - [x] 3.5.3. Resource circuit breakers: default `MAX_TURNS=40`, `MAX_WALL_CLOCK_MINUTES=20`, `MAX_COST_USD=0.50` per task. Exceeding any limit stops the task gracefully with a final trace.
+  - [x] 3.5.4. Human approval gate: pause before destructive actions (`git push`, `git push --force`, branch deletion, `rm -rf`, opening a PR, force-merging) and require UI/webhook approval.
+- [x] 3.6. **Eval harness:** Define a `packages/evals` package with a small benchmark set (a toy repo, a real-ish one-line bug, a failing test). Each phase must be able to run `pnpm eval` and report pass/fail, token count, cost, and wall-clock time.
+- [x] 3.7. **Cost and quota-budget model:** Produce a living budget document (`docs/COST_BUDGET.md`) that models:
   - LLM tokens per turn and per task against chosen free-tier provider(s).
   - Upstash Redis free-tier 10,000 commands/day and Supabase 500MB/500k row limits.
   - Daytona snapshot frequency, latency, and credit consumption for time-travel.
   - Langfuse free trace tier (50,000 traces/month).
-- [ ] 3.8. **Secrets management strategy:** No secrets in code. Local: `.env` + 1Password/direnv or similar. Cloud: Cloudflare Worker secrets + Supabase Vault. GitHub App private key stored as a Cloudflare secret/Worker secret. Document rotation policy.
-- [ ] 3.9. **Time-travel feasibility spike (critical):**
-  - [ ] 3.9.1. Prove Pi session state can be serialized to a deterministic blob, reloaded into a fresh process, and optionally branched/forked. If `pi-agent-core` does not expose this, identify the minimal wrapper or patch needed.
-  - [ ] 3.9.2. Measure `daytona.snapshot()` latency and cost on a small workspace; determine if per-turn snapshots are viable or if a per-turn `git commit` + dependency-cache strategy is required.
-  - [ ] 3.9.3. Document the chosen checkpoint strategy in `docs/TIME_TRAVEL.md` before Phase 4 begins. If feasibility fails, downgrade time-travel to git-based checkpoints.
-- [ ] 3.10. Set up CI: `pnpm install`, lint, typecheck, unit tests, and the eval harness on every push.
-- [ ] 3.11. Confirm `pi-agent-core` (v0.83.0+) installs cleanly and its tool-registration and context-compaction APIs are understood.
-- [ ] 3.12. Spike each tool in isolation (`read`, `edit`, `bash npm test`) and record baseline `tokens/turn`, `p50 latency/turn`, and `cost/task` on the toy repo.
-- [ ] 3.13. Document the chosen free LLM provider, its quota shape, and fallback providers.
-- [ ] 3.14. **Exit criteria:**
+- [x] 3.8. **Secrets management strategy:** No secrets in code. Local: `.env` + 1Password/direnv or similar. Cloud: Cloudflare Worker secrets + Supabase Vault. GitHub App private key stored as a Cloudflare secret/Worker secret. Document rotation policy.
+- [x] 3.9. **Time-travel feasibility spike (critical):**
+  - [x] 3.9.1. Prove Pi session state can be serialized to a deterministic blob, reloaded into a fresh process, and optionally branched/forked. If `pi-agent-core` does not expose this, identify the minimal wrapper or patch needed.
+  - [x] 3.9.2. Measure `daytona.snapshot()` latency and cost on a small workspace; determine if per-turn snapshots are viable or if a per-turn `git commit` + dependency-cache strategy is required.
+  - [x] 3.9.3. Document the chosen checkpoint strategy in `docs/TIME_TRAVEL.md` before Phase 4 begins. If feasibility fails, downgrade time-travel to git-based checkpoints.
+- [x] 3.10. Set up CI: `pnpm install`, lint, typecheck, unit tests, and the eval harness on every push.
+- [x] 3.11. Confirm `pi-agent-core` (v0.83.0+) installs cleanly and its tool-registration and context-compaction APIs are understood.
+- [x] 3.12. Spike each tool in isolation (`read`, `edit`, `bash npm test`) and record baseline `tokens/turn`, `p50 latency/turn`, and `cost/task` on the toy repo.
+- [x] 3.13. Document the chosen free LLM provider, its quota shape, and fallback providers.
+- [x] 3.14. **Exit criteria:**
   - `pnpm spike` clones a toy repo, runs its tests, applies a one-line fix, re-runs tests until green, and prints a token/latency/cost summary table.
   - Attempting to read `.env` is blocked by the denylist.
   - `MAX_TURNS` is enforced.
