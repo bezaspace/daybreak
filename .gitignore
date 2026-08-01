@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+*.tsbuildinfo
+.DS_Store
+*.log
+.pnpm-debug.log*
+.turbo/
+.vscode/
+.idea/

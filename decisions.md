@@ -19,11 +19,11 @@
 
 ---
 
-## D2. Agent kernel: `@earendil-works/pi-agent-core`
+## D2. Agent kernel: Pi SDK (`pi-coding-agent` / `pi-agent-core`)
 
-**Decision:** Build the agent runner on top of the Pi SDK (`@earendil-works/pi-agent-core`, currently `0.83.0`).
+**Decision:** Build the agent runner on top of the Pi SDK (`@earendil-works/pi-coding-agent`, which wraps `pi-agent-core`, currently `0.83.0`).
 
-**Rationale:** Pi provides a minimalist, tree-structured TypeScript agent framework with execution history, context-window compaction, and tool loops. It is open-source and matches the TypeScript/Node control-plane stack.
+**Rationale:** `pi-coding-agent` ships with the built-in read/bash/edit/write tools, `AgentSession`, and tree-structured session management that Phase 0 needs. It is open-source and matches the TypeScript/Node control-plane stack. `pi-agent-core` remains the underlying abstraction for tool-call hooks and event streaming.
 
 **Alternatives considered:**
 - LangChain/LangGraph: heavier and more opinionated.

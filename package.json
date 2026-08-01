@@ -1,0 +1,25 @@
+{
+  "name": "daybreak",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Daybreak — open-source, cloud-native autonomous AI software engineer platform",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "spike": "pnpm --filter agent-runner spike",
+    "eval": "pnpm --filter evals eval",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "build": "pnpm -r build",
+    "clean": "pnpm -r clean"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "tsx": "^4.23.1",
+    "typescript": "^5.7.3"
+  },
+  "packageManager": "pnpm@11.18.0"
+}
