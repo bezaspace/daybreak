@@ -57,11 +57,15 @@ export class TaskRunner {
 
     try {
       await this.session.prompt(prompt);
+      if (!this.abortedReason && this.metrics.current().toolCalls === 0) {
+        this.abort("Agent finished without taking any action");
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       if (this.abortedReason) {
         console.error(pc.yellow(`\n[run aborted] ${this.abortedReason}`));
       } else {
+        this.abort(errorMessage);
         console.error(pc.red(`\n[run error] ${errorMessage}`));
       }
     } finally {
@@ -136,6 +140,23 @@ export class TaskRunner {
               JSON.stringify(event.result).slice(0, 200),
             );
           }
+          break;
+        }
+        case "auto_retry_start": {
+          console.log(pc.yellow(`[retry start] attempt ${event.attempt}/${event.maxAttempts}: ${event.errorMessage}`));
+          break;
+        }
+        case "auto_retry_end": {
+          if (event.finalError) {
+            console.log(pc.red(`[retry end] final error after ${event.attempt} attempts: ${event.finalError}`));
+            this.abort(`Model retries exhausted: ${event.finalError}`);
+          } else {
+            console.log(pc.green(`[retry end] recovered after ${event.attempt} attempts`));
+          }
+          break;
+        }
+        case "agent_end": {
+          console.log(pc.yellow(`[agent end] willRetry=${event.willRetry}`));
           break;
         }
       }

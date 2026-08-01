@@ -1,26 +1,35 @@
 #!/usr/bin/env node
 import { loadConfig } from "@daybreak/shared";
 import { execSync } from "node:child_process";
-import { dirname, resolve } from "node:path";
+import { writeFileSync } from "node:fs";
 import pc from "picocolors";
-import { fileURLToPath } from "node:url";
 import { TaskRunner } from "./session.js";
 
-const __dirname = import.meta.dirname ?? dirname(fileURLToPath(import.meta.url));
-
+const workDir = process.env.WORK_DIR || "/home/daytona";
 const targetRepoUrl = process.env.TARGET_REPO_URL;
 const targetBranch = process.env.TARGET_BRANCH || "main";
-const targetDir = process.env.TARGET_DIR || "/home/daytona/target";
+const targetDir = process.env.TARGET_DIR || `${workDir}/target`;
 const autoApprove = process.env.AUTO_APPROVE !== "false";
 const pushAfterFix = process.env.PUSH_AFTER_FIX !== "false";
+const gitAskpassPath = process.env.GIT_ASKPASS || `${workDir}/.git-askpass.sh`;
 
 const defaultPrompt = `You are in a git repository at ${targetDir}. There is a failing test. Read the source and test files, understand the bug, make the minimal fix, and run the test command until it passes.${pushAfterFix ? ` Then stage the change with "git add -A", commit with "git -c user.name='Daybreak Bot' -c user.email='daybreak@example.com' commit -m 'fix: <concise message>'", and push to origin ${targetBranch}. Do not create any new branches.` : ""}`;
 
 const prompt = process.env.TASK_PROMPT || defaultPrompt;
 const systemPrompt = process.env.TASK_SYSTEM_PROMPT || `You are Daybreak, an autonomous coding agent running in a Daytona sandbox. Investigate, fix, verify, then${pushAfterFix ? " commit and push" : " report the fix"}.`;
 
-function run(cmd: string, cwd: string, stdio: "inherit" | "pipe" = "pipe") {
-  return execSync(cmd, { cwd, stdio, maxBuffer: 10 * 1024 * 1024 });
+function writeGitAskpassScript(path: string) {
+  const script = `#!/bin/bash
+if [[ "$1" == *"Username"* ]]; then
+  echo "x-access-token"
+else
+  echo "$GITHUB_TOKEN"
+fi`;
+  writeFileSync(path, script, { mode: 0o700 });
+}
+
+function run(cmd: string, cwd: string, stdio: "inherit" | "pipe" = "pipe", env?: NodeJS.ProcessEnv) {
+  return execSync(cmd, { cwd, stdio, maxBuffer: 10 * 1024 * 1024, shell: "/usr/bin/bash", env });
 }
 
 async function main() {
@@ -29,11 +38,13 @@ async function main() {
     process.exit(1);
   }
 
-  const token = process.env.GITHUB_TOKEN;
-  const cloneUrl = token ? targetRepoUrl.replace("https://", `https://x-access-token:${token}@`) : targetRepoUrl;
+  if (process.env.GITHUB_TOKEN) {
+    writeGitAskpassScript(gitAskpassPath);
+    process.env.GIT_ASKPASS = gitAskpassPath;
+  }
 
   console.log(pc.bold("[run-task] cloning target repo..."));
-  run(`rm -rf "${targetDir}" && git clone --branch ${targetBranch} --single-branch ${cloneUrl} "${targetDir}"`, "/home/daytona", "inherit");
+  run(`rm -rf "${targetDir}" && git clone --branch ${targetBranch} --single-branch ${targetRepoUrl} "${targetDir}"`, workDir, "inherit");
 
   const config = loadConfig();
   const runner = new TaskRunner(config);

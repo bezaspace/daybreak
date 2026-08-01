@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { loadConfig } from "@daybreak/shared";
 import { Daytona } from "@daytona/sdk";
+import { resolve } from "node:path";
 import pc from "picocolors";
 
 function getArg(name: string): string | undefined {
@@ -21,6 +22,9 @@ async function main() {
     process.exit(1);
   }
 
+  const bundlePath = resolve(process.cwd(), "dist/run-task.cjs");
+  const remotePath = "/home/daytona/run-task.cjs";
+
   const daytona = new Daytona({
     apiKey: config.daytonaApiKey,
     apiUrl: config.daytonaApiUrl,
@@ -33,6 +37,7 @@ async function main() {
     autoStopInterval: 0,
     ttlMinutes: 120,
     envVars: {
+      PATH: "/usr/local/share/nvm/current/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
       LLM_PROVIDER: config.llm.provider,
       LLM_BASE_URL: config.llm.baseUrl,
       LLM_API_KEY: config.llm.apiKey,
@@ -58,22 +63,21 @@ async function main() {
 
   console.log(pc.bold(`[sandbox] created ${sandbox.id} (${sandbox.state ?? "unknown state"})`));
 
-  const sessionId = "daybreak-task";
-  const setupAndRun = `set -e
-cd /home/daytona
-git clone https://x-access-token:$GITHUB_TOKEN@github.com/bezaspace/daybreak.git daybreak
-cd daybreak
-npx pnpm@11.18.0 install
-npx pnpm@11.18.0 --filter agent-runner task`;
-
   let heartbeat: NodeJS.Timeout | undefined;
   try {
-    await sandbox.process.createSession(sessionId);
-    console.log(pc.bold("[sandbox] running agent in sandbox (this may take a few minutes)..."));
+    await sandbox.process.createSession("daybreak-task");
 
+    console.log(pc.bold("[sandbox] uploading agent bundle..."));
+    await sandbox.fs.uploadFile(bundlePath, remotePath);
+
+    console.log(pc.bold("[sandbox] running agent in sandbox..."));
     heartbeat = setInterval(() => process.stdout.write("."), 3000);
 
-    const startResponse = await sandbox.process.executeSessionCommand(sessionId, { command: setupAndRun, runAsync: true }, 10);
+    const startResponse = await sandbox.process.executeSessionCommand(
+      "daybreak-task",
+      { command: `node ${remotePath}`, runAsync: true },
+      1200,
+    );
     const cmdId = startResponse.cmdId;
     if (!cmdId) {
       throw new Error("No command ID returned for async session command");
@@ -84,11 +88,11 @@ npx pnpm@11.18.0 --filter agent-runner task`;
     let completed = false;
 
     while (!completed) {
-      await new Promise((resolve) => setTimeout(resolve, 5000));
+      await new Promise((res) => setTimeout(res, 5000));
 
       const [cmd, logs] = await Promise.all([
-        sandbox.process.getSessionCommand(sessionId, cmdId),
-        sandbox.process.getSessionCommandLogs(sessionId, cmdId),
+        sandbox.process.getSessionCommand("daybreak-task", cmdId),
+        sandbox.process.getSessionCommandLogs("daybreak-task", cmdId),
       ]);
 
       if (logs.output && logs.output.length > printedOutput) {

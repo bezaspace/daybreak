@@ -13,11 +13,12 @@
   "scripts": {
     "spike": "tsx src/spike.ts",
     "task": "tsx src/run-task.ts",
-    "sandbox": "tsx src/sandbox.ts",
+    "sandbox": "tsx src/build-bundle.ts && tsx src/sandbox.ts",
     "lint": "tsc --noEmit && echo 'agent-runner lint OK'",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "build": "tsc --noEmit",
+    "build:bundle": "tsx src/build-bundle.ts",
     "clean": "rm -rf dist .tsbuildinfo"
   },
   "dependencies": {
@@ -30,6 +31,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.13.0",
+    "esbuild": "0.25.12",
     "tsx": "^4.23.1",
     "typescript": "^5.7.3",
     "vitest": "^3.0.0"
