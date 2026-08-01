@@ -11,6 +11,7 @@ export interface RunOptions {
   systemPrompt?: string;
   autoApprove?: boolean;
   onStream?: (text: string) => void;
+  onEvent?: (event: AgentSessionEvent) => void;
 }
 
 export class TaskRunner {
@@ -28,7 +29,7 @@ export class TaskRunner {
   }
 
   async run(options: RunOptions): Promise<TaskResult> {
-    const { prompt, cwd, systemPrompt, autoApprove, onStream } = options;
+    const { prompt, cwd, systemPrompt, autoApprove, onStream, onEvent } = options;
 
     const { modelRuntime, model } = await createModelRuntime(this.config.llm, this.config.llmFallback);
 
@@ -51,7 +52,7 @@ export class TaskRunner {
     }
 
     this.wireSafety();
-    this.wireMetrics();
+    this.wireMetrics(onEvent);
     this.wireStreaming(onStream);
     this.startWallClockTimer();
 
@@ -95,12 +96,14 @@ export class TaskRunner {
     };
   }
 
-  private wireMetrics(): void {
+  private wireMetrics(onEvent?: (event: AgentSessionEvent) => void): void {
     if (!this.session) return;
 
     const pendingToolCalls = new Map<string, ToolCallRecord>();
 
     this.session.subscribe((event: AgentSessionEvent) => {
+      onEvent?.(event);
+
       switch (event.type) {
         case "turn_start": {
           this.metrics.recordTurn();

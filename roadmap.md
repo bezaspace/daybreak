@@ -38,7 +38,7 @@ Progress is measured by the completion of demoable vertical slices and objective
 | Phase | Name | Ships |
 |-------|------|-------|
 | [x] 0 | Foundation, Safety Baseline & Feasibility Spikes | Agent loop + guardrails + eval harness + cost/quotabudget model + time-travel feasibility proof |
-| [ ] 1 | Safe Local MVP Vertical Slice | End-to-end dashboard → sandbox → PR with safety, streaming, browser tool, and approval gates |
+| [ ] 1 | Safe Local MVP Vertical Slice | End-to-end dashboard → E2B sandbox → stream via Upstash + local control-plane + React UI. Supabase persistence, GitHub PRs, browser tool, approval gates, and eval harness integration remain for follow-up slices. |
 | [ ] 2 | Observability, Cost Control & Provider Resilience | OTel/Langfuse trace tree, cost dashboard, provider fallback |
 | [ ] 3 | GitHub-Native Triggers & Review Loop | GitHub App, issue/PR-comment triggers, scoped 1h tokens, review-loop listener |
 | [ ] 4 | Time-Travel State Branching | Per-turn checkpoints, filesystem + Pi-state rewind, parallel attempt forking |
@@ -88,18 +88,18 @@ Progress is measured by the completion of demoable vertical slices and objective
 
 **Goal:** The full Daybreak loop, demoable end-to-end locally, with safety, evals, and cost tracking already in place.
 
-- [ ] 4.1. **Control plane:** Local Node.js/TypeScript server (`packages/control-plane`), structured for Cloudflare Worker migration. `/api/tasks` POST handler that authenticates, creates a Supabase session row, invokes E2B, and streams events to Upstash Redis.
+- [x] 4.1. **Control plane (local MVP):** Local Hono server (`packages/control-plane`) exposes `POST /api/tasks`, `GET /api/tasks`, `GET /api/tasks/:id`, `GET /api/tasks/:id/events`, and `GET /api/tasks/:id/stream`. It spawns the E2B-based agent runner and reads from Upstash Redis. Supabase persistence, auth, and Cloudflare Worker migration are deferred.
 - [x] 4.2. **Agent runner:** Runs inside the E2B sandbox. Wraps Pi SDK, clones the target repo, configures bot committer, iterates (`read`/`bash`/`edit`), then commits and pushes directly to the target branch (`main` for this slice, per user authorization).
 - [x] 4.3. **Sandbox provisioning:** E2B TypeScript SDK `Sandbox.create()` from the `base` template; runtime prep installs git and Node 22. pnpm/Python and additional runtimes are pending Phase-1 extensions.
-- [ ] 4.4. **Real-time stream:** Sandbox publishes `stdout`/`stderr`/tool-events to an Upstash Redis pub/sub channel; local UI subscribes. Monitor Upstash command consumption against the quota model.
-- [ ] 4.5. **UI:** Local React + Vite dev server. Task trigger form, live terminal panel, PR link, basic task list, and approval-gate buttons for destructive actions.
+- [x] 4.4. **Real-time stream:** Sandbox publishes lifecycle and tool events to an Upstash Redis list (`daybreak:stream:<taskId>`) using batched `rpush` + `ltrim`, keeping the last 1000 events per task. The control plane serves them via SSE (`/api/tasks/:id/stream`).
+- [x] 4.5. **UI (local MVP):** React + Vite dashboard (`packages/ui`) with a repo/branch trigger form, live terminal panel, and recent task list. It consumes the Hono SSE endpoint. PR links and approval-gate buttons are deferred.
 - [ ] 4.6. **Persistence:** Supabase Postgres. `sessions`, `tasks`, `events`, `checkpoints` (stub) tables.
-- [ ] 4.7. **Event schema:** `tool_call`, `tool_result`, `stdout`, `stderr`, `llm_prompt`, `llm_response`, `approval_request`, `approval_response`, `task_complete`, `task_failed`.
+- [x] 4.7. **Event schema (MVP):** `task_start`, `agent_start`, `turn_start`, `message_start`, `message_update`, `message_end`, `tool_execution_start`, `tool_execution_end`, `tool_execution_update`, `auto_retry_start`, `auto_retry_end`, `agent_end`, `bash_execution_update`, `task_complete`, `task_failed`. Additional fields (`approval_request`, `approval_response`, etc.) are added when approval gates are implemented.
 - [ ] 4.8. **Context compaction:** Integrate Pi's compaction settings and the hard `MAX_TURNS` cap from Phase 0.
 - [ ] 4.9. **Browser/Playwright tool:** Integrate headless Chromium inside the sandbox so the agent can visually verify running web apps and interact with DOM elements; stream screenshots to the UI.
 - [x] 4.10. **PR delivery path:** direct branch/`main` push via HTTPS with `GITHUB_TOKEN` (user-authorized for this slice); GitHub API `POST /repos/{owner}/{repo}/pulls` creation deferred to Phase 3.
-- [ ] 4.11. **Control channel:** Control plane issues commands over E2B's process exec API; sandbox pushes events to Upstash.
-- [ ] 4.12. **UI WebSocket:** Local server holds the client connection, pulls from Upstash REST, relays to browser.
+- [x] 4.11. **Control channel (MVP):** Control plane issues the spawn command and `TASK_ID` to the E2B sandbox; the sandbox pushes all events to Upstash Redis. Interactive commands and bidirectional control are deferred.
+- [x] 4.12. **UI streaming:** Browser connects to the Hono SSE endpoint `/api/tasks/:id/stream` and renders events live. WebSocket migration is deferred to a later phase if needed.
 - [ ] 4.13. Run the Phase 0 eval harness against this local MVP and record wall-clock time, token count, and $-cost per task.
 - [ ] 4.14. **Exit criteria:** From the local dashboard, click "Fix failing test on repo X" → watch live terminal and browser stream → a PR appears on GitHub. The PR contains a real fix that passes CI, no `.env` was read, the branch is not `main`, and `MAX_TURNS`/`MAX_COST` are enforced.
 

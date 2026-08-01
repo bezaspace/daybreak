@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { loadConfig } from "@daybreak/shared";
 import { CommandExitError, Sandbox } from "e2b";
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import pc from "picocolors";
@@ -21,6 +22,7 @@ async function main() {
   const config = loadConfig();
   const targetRepo = getArg("--repo") || "https://github.com/bezaspace/daybreak-target";
   const targetBranch = getArg("--branch") || "main";
+  const taskId = getArg("--task-id") || randomUUID();
 
   if (!config.e2bApiKey) {
     console.error(pc.red("E2B_API_KEY is required"));
@@ -52,12 +54,15 @@ async function main() {
       LLM_FALLBACK_API_KEY: config.llmFallback?.apiKey || "",
       LLM_FALLBACK_MODEL: config.llmFallback?.modelId || "",
       GITHUB_TOKEN: config.githubToken,
+      TASK_ID: taskId,
       TARGET_REPO_URL: targetRepo,
       TARGET_BRANCH: targetBranch,
       TARGET_DIR: `${WORK_DIR}/target`,
       WORK_DIR,
       AUTO_APPROVE: "true",
       PUSH_AFTER_FIX: "true",
+      UPSTASH_REDIS_REST_URL: config.upstashRedisRestUrl || "",
+      UPSTASH_REDIS_TOKEN: config.upstashRedisToken || "",
       MAX_TURNS: String(config.maxTurns),
       MAX_WALL_CLOCK_MINUTES: String(config.maxWallClockMinutes),
       MAX_COST_USD: String(config.maxCostUsd),
@@ -67,7 +72,7 @@ async function main() {
     },
   });
 
-  console.log(pc.bold(`[sandbox] created ${sandbox.sandboxId}`));
+  console.log(pc.bold(`[sandbox] created ${sandbox.sandboxId} taskId=${taskId}`));
 
   try {
     console.log(pc.bold("[sandbox] installing Node 22..."));

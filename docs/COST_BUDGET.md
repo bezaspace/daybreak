@@ -24,9 +24,9 @@ Free providers are used wherever possible. For paid fallbacks, the target model 
 ## Infrastructure burn rates
 
 ### Redis
-- Each task turn may read/write state and stream stdout chunks. At 10 commands per turn and a 40-turn task, one task uses ~400 Redis commands.
-- Free quota: **500K commands/month** → ~1,250 tasks/month.
-- **Guardrail:** `MAX_TURNS` and stream batching limit command volume.
+- The sandbox publishes one event per `message_update`/`tool_execution_*`/`agent_end`/`task_complete` etc. Each event triggers one `RPUSH` and the flush batch includes one `LTRIM` per 100 ms window, keeping the last 1000 events per task. A short 5-turn fix run with ~30 events therefore uses ~30–35 Redis commands.
+- Free quota: **500K commands/month** → roughly **10,000–15,000 short tasks/month** at the current event volume.
+- **Guardrail:** `MAX_TURNS`, the 1000-event `LTRIM` cap, and 100 ms batching limit command volume. Monitor the Upstash dashboard; if usage climbs, increase batch interval or sample events.
 
 ### E2B
 - The free Hobby tier provides $100 in one-time credits before any paid usage begins.

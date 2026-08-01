@@ -14,14 +14,19 @@
     "lint": "tsc --noEmit && echo 'control-plane lint OK'",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
+    "dev": "tsx src/server.ts",
     "build": "tsc --noEmit",
     "clean": "rm -rf dist .tsbuildinfo"
   },
   "dependencies": {
-    "@daybreak/shared": "workspace:*"
+    "@daybreak/shared": "workspace:*",
+    "@hono/node-server": "^2.0.12",
+    "@upstash/redis": "^1.38.0",
+    "hono": "^4.12.32"
   },
   "devDependencies": {
     "@types/node": "^22.13.0",
+    "tsx": "^4.23.1",
     "typescript": "^5.7.3",
     "vitest": "^3.0.0"
   }

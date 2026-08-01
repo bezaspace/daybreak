@@ -28,7 +28,8 @@ Daybreak needs several credentials across its lifecycle. This document explains 
 - Store `GITHUB_WEBHOOK_SECRET` as a Cloudflare secret and verify HMAC in the worker.
 
 ### Redis / Supabase / Langfuse
-- `UPSTASH_REDIS_TOKEN` and `SUPABASE_SERVICE_KEY` are high-sensitivity.
+- `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_TOKEN` are high-sensitivity; the sandbox uses them to publish the event stream and the control plane uses them to read it back.
+- `SUPABASE_SERVICE_KEY` is high-sensitivity and is only used once persistence is enabled.
 - Langfuse keys (`LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`) are lower risk but still kept out of source control.
 
 ## Never commit secrets

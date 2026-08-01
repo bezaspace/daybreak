@@ -2,8 +2,8 @@
 
 An open-source, cloud-native developer agent platform that autonomously plans, writes, executes, tests, and ships production software. Ingests natural-language prompts, GitHub Issues, or PR review comments; provisions an isolated Linux execution sandbox; and iterates toward a solution until tests pass and a pull request is submitted. Built with enterprise transparency, deep observability, and **time-travel state rewinding** at its core — every model prompt, token count, tool latency, and reasoning step is traceable, and a human can pause, rewind the agent's execution tree to any step, edit the context, and spawn a parallel attempt branch without starting over.
 
-**Status**: Planning — spec complete, build pending.
-**Started**: 2026-08-01 (planning)
+**Status**: Phase 0 complete; Phase 1 local MVP streaming slice implemented and verified end-to-end.
+**Started**: 2026-08-01
 
 ---
 
@@ -21,12 +21,12 @@ This is a learning and demonstration project, not a product to sell.
 
 A user (or a GitHub Issue, or a PR review comment) gives Daybreak a task. The platform:
 
-1. **Triggers** via the web dashboard or a GitHub Issue tag (`@daybreak-bot fix test failure`). The Cloudflare Worker control plane authenticates, fetches a 1-hour scoped GitHub token, and logs the session in Supabase.
-2. **Provisions a sandbox** — invokes the E2B SDK to launch a pre-configured Linux sandbox (default `base` template, installs Node 22 on first boot).
-3. **Prepares the workspace** — inside the sandbox, the Pi SDK agent clones the target repo, configures bot committer details, and checks out a new feature branch.
-4. **Iterates** — analyzes the codebase with `read` and `bash`, parses errors, applies fixes with `edit`/`write`, re-runs tests. Terminal output streams live to the React dashboard over Upstash Redis WebSockets.
-5. **Delivers** — pushes the branch, submits a Pull Request via the GitHub API, marks the task complete.
-6. **Monitors** — registers webhook listeners for CI status checks and reviewer comments, keeping the sandbox on standby to self-heal failed CI or apply review feedback.
+1. **Triggers** via the local React dashboard or a `curl` to the local Hono control plane (`POST /api/tasks`). The control plane provisions an E2B sandbox and opens an SSE stream from Upstash Redis.
+2. **Provisions a sandbox** — invokes the E2B SDK to launch the `base` template and installs Node 22 at startup.
+3. **Prepares the workspace** — inside the sandbox, the Pi SDK agent clones the target repo, configures bot committer details, and checks out the target branch.
+4. **Iterates** — analyzes the codebase with `read` and `bash`, parses errors, applies fixes with `edit`/`write`, and re-runs tests. Events stream live to the React dashboard over Upstash Redis via a Hono SSE endpoint.
+5. **Delivers** — commits and pushes the fix to the target branch (direct `main` push for this slice, per user authorization). Pull-request creation is deferred to Phase 3.
+6. **Monitors** — the UI receives the `task_complete` or `task_failed` event and shows the final status. Webhook listeners for CI/review are deferred.
 
 The differentiators that make this more than "another coding agent":
 
@@ -39,18 +39,18 @@ The differentiators that make this more than "another coding agent":
 ## Tech Stack
 
 - **Agent Kernel**: Pi SDK (`@earendil-works/pi-agent-core`) — minimalist, tree-structured TypeScript agent framework handling execution history, context-window compaction, and tool loops. Tools: `read`, `write`, `edit`, `bash`, `browser` (headless Chromium via Playwright — navigate pages, take screenshots, interact with DOM elements, and visually verify running web apps inside the sandbox).
-- **Control Plane & API**: Node.js / TypeScript on Cloudflare Workers & Pages — edge serverless gateway for webhook processing, session routing, and auth.
-- **UI**: React / Next.js on Cloudflare Pages / Vercel — real-time streaming terminal logs, code diff previews, and trace trees.
+- **Control Plane & API**: Node.js / TypeScript with Hono, run locally for the MVP (`packages/control-plane`). It is written with Worker-compatible APIs where possible, but Cloudflare Worker deployment is deferred to Phase 7.
+- **UI**: React + Vite local dev server (`packages/ui`) — real-time streaming terminal panel, task trigger form, and recent task list. Cloudflare Pages / Next.js are deferred.
 - **Cloud Execution**: E2B SDK — stateful Linux container sandboxes (free Hobby tier with $100 in one-time credits, no credit card; snapshots + volumes included, which backs the time-travel filesystem rewind; unrestricted outbound internet for OpenAI-compatible providers).
 - **LLM Intelligence**: any OpenAI-compatible LLM provider — the agent kernel talks to whatever OpenAI-compatible endpoint is configured (base URL + API key). This keeps the platform provider-agnostic and lets it ride the wide ecosystem of free OpenAI-compatible endpoints available online (Groq, OpenRouter free tiers, self-hosted vLLM/Ollama, etc.) rather than being locked to a single vendor. The $0 thesis depends on picking a free-tier OpenAI-compatible provider at deploy time, not on any one vendor's quota staying generous.
-- **Real-Time Stream Engine**: Upstash Redis (free tier, 10,000 commands/day) — distributed pub/sub for WebSocket event streaming between sandboxes and the web UI.
+- **Real-Time Stream Engine**: Upstash Redis (free tier, 500K commands/month) — sandbox events are appended to a per-task Redis list with batched `RPUSH` + `LTRIM`; the control plane exposes them as SSE.
 - **Data & Session Persistence**: PostgreSQL on Supabase (free tier, 500MB) — user sessions, GitHub App installations, task histories, checkpoint metadata.
 - **Observability & Tracing**: OpenTelemetry standard emitted to Langfuse Cloud (50,000 free traces/month) — prompt tracing, tool latency, execution-tree graph rendering.
 
 ## Build Plan (MVP vertical slice first, then layer the differentiators)
 
 1. **Phase 0** — Repo + `PROJECT_PLAN.md` + `PROGRESS.md`. Pi SDK spike: prove `Agent` + `read`/`write`/`edit`/`bash` tools run against an OpenAI-compatible LLM provider.
-2. **Phase 1 (MVP)** — Dashboard trigger → Cloudflare Worker → E2B sandbox → Pi agent clones a repo, runs tests, edits, pushes a branch, opens a PR. Stream terminal output to a minimal React UI via Upstash. *Demoable on its own.*
+2. **Phase 1 (MVP)** — Dashboard trigger → local Hono control plane → E2B sandbox → Pi agent clones a repo, runs tests, edits, pushes the fix to the target branch, streams events to a minimal React + Vite UI via Upstash Redis + Hono SSE. *Demoable on its own.*
 3. **Phase 2** — OTel instrumentation → Langfuse; DAG trace visualizer in the dashboard.
 4. **Phase 3** — GitHub App: issue/PR-comment triggers, scoped tokens, review-loop listener.
 5. **Phase 4** — Time-travel: per-turn E2B snapshots + Pi state serialization → rewind + branch UI. *(The headline feature, deliberately late — it's the hardest part.)*

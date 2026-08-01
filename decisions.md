@@ -99,13 +99,14 @@
 
 ## D8. Upstash Redis for real-time streaming
 
-**Decision:** Use Upstash Redis free tier as the pub/sub broker between sandboxes and the UI.
+**Decision:** Use Upstash Redis free tier as the stream broker between sandboxes and the UI.
 
 **Rationale:** Serverless Redis with a free tier and a simple REST API; works with both local and Cloudflare deployments.
 
 **Consequences:**
-- Free tier is 10,000 commands/day. We must batch or rate-limit stream events and monitor consumption.
-- If the free tier is exhausted, streaming degrades or stops; design for idempotent replay where possible.
+- Free tier is 500K commands/month. Events are appended to per-task lists with batched `RPUSH` and a single `LTRIM` per flush, keeping the last 1000 events. This keeps command volume low enough for thousands of short runs per month.
+- If the quota is exhausted, streaming degrades or stops; the 1000-event retention and SSE replay still let a late-joining UI catch up while the quota lasts.
+- The implementation uses `@upstash/redis` inside the agent bundle and inside the control plane, so both local and Cloudflare deployments share the same client.
 
 ---
 
@@ -211,12 +212,13 @@
 
 ## D17. Branch protection: never commit to `main`/`master`
 
-**Decision:** The agent is hard-blocked from committing to `main`, `master`, or any protected branch. Every task creates a feature branch.
+**Decision:** The agent is hard-blocked from committing to `main`, `master`, or any protected branch by default. Every task creates a feature branch.
 
 **Rationale:** Prevents accidental or adversarial destruction of the default branch.
 
 **Consequences:**
-- The PR delivery path is the only way to land code.
+- The PR delivery path is the normal way to land code.
+- For the Phase 1 local MVP slice, an explicit `PROTECTED_BRANCHES=__none__` override and per-task authorization allow direct pushes to the target branch (e.g., `main`) when the operator opts in. This override is removed when the GitHub App/PR flow lands in Phase 3.
 - Some operations (e.g., automated releases) may need explicit out-of-scope handling.
 
 ---
