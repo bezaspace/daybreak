@@ -17,6 +17,12 @@ interface Task {
   prUrl?: string;
 }
 
+interface Screenshot {
+  dataUrl: string;
+  url?: string;
+  timestamp: number;
+}
+
 function formatEvent(event: StreamEvent): string {
   const time = new Date(event.timestamp).toLocaleTimeString();
   if (event.type === "task_start") {
@@ -37,6 +43,10 @@ function formatEvent(event: StreamEvent): string {
     const prefix = data.isError ? "✗" : "✓";
     return `[${time}] ${prefix} ${data.toolName} ${data.result ? JSON.stringify(data.result).slice(0, 240) : ""}`;
   }
+  if (event.type === "browser_screenshot") {
+    const data = event.data as { url?: string };
+    return `[${time}] browser_screenshot: ${data.url || ""}`;
+  }
   if (event.type === "task_complete" || event.type === "task_failed") {
     const data = event.data as { success?: boolean; error?: string };
     return `[${time}] ${event.type}${data.error ? ": " + data.error : ""}`;
@@ -56,6 +66,7 @@ export function App() {
   const [events, setEvents] = useState<StreamEvent[]>([]);
   const [status, setStatus] = useState<string>("idle");
   const [prUrl, setPrUrl] = useState<string | null>(null);
+  const [screenshots, setScreenshots] = useState<Screenshot[]>([]);
   const terminalRef = useRef<HTMLPreElement>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
 
@@ -75,6 +86,7 @@ export function App() {
     setEvents([]);
     setStatus("running");
     setPrUrl(null);
+    setScreenshots([]);
 
     const es = new EventSource(`/api/tasks/${taskId}/stream`);
     es.onmessage = (message) => {
@@ -82,6 +94,20 @@ export function App() {
       try {
         const event = JSON.parse(message.data) as StreamEvent;
         setEvents((prev) => [...prev, event]);
+        if (event.type === "browser_screenshot") {
+          const data = event.data as { screenshot?: string; url?: string; mimeType?: string };
+          if (data.screenshot) {
+            const mimeType = data.mimeType || "image/png";
+            setScreenshots((prev) => [
+              ...prev,
+              {
+                dataUrl: `data:${mimeType};base64,${data.screenshot}`,
+                url: data.url,
+                timestamp: event.timestamp,
+              },
+            ]);
+          }
+        }
         if (event.type === "pr_created") {
           const data = event.data as { prUrl?: string };
           if (data.prUrl) {
@@ -169,6 +195,21 @@ export function App() {
             </span>
           )}
         </p>
+      )}
+
+      {screenshots.length > 0 && (
+        <div style={{ marginBottom: "1rem" }}>
+          {screenshots.map((s, i) => (
+            <div key={i} style={{ marginBottom: "1rem" }}>
+              <img
+                src={s.dataUrl}
+                alt={`Screenshot ${i + 1}${s.url ? ` of ${s.url}` : ""}`}
+                style={{ maxWidth: "100%", border: "1px solid #ccc", borderRadius: 8 }}
+              />
+              <div style={{ color: "#666", fontSize: 12 }}>{s.url || "Browser screenshot"}</div>
+            </div>
+          ))}
+        </div>
       )}
 
       <pre

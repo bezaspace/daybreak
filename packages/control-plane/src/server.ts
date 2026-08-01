@@ -115,10 +115,13 @@ app.get("/api/tasks", async (c) => {
   return c.json(dbTasks.length ? dbTasks : Array.from(tasks.values()));
 });
 
+const config = loadConfig();
+
 app.post("/api/tasks", async (c) => {
-  const body = await c.req.json<{ repo?: string; branch?: string }>().catch(() => ({}) as { repo?: string; branch?: string });
+  const body = await c.req.json<{ repo?: string; branch?: string; prompt?: string }>().catch(() => ({}) as { repo?: string; branch?: string; prompt?: string });
   const repo = body.repo;
   const branch = body.branch || "main";
+  const prompt = body.prompt;
 
   if (!repo) {
     return c.json({ error: "repo is required" }, 400);
@@ -128,20 +131,30 @@ app.post("/api/tasks", async (c) => {
   tasks.set(task.id, task);
   await persistTask(task);
 
-  const config = loadConfig();
   const env: NodeJS.ProcessEnv = {
     ...process.env,
+    E2B_TEMPLATE: config.e2bTemplate || "base",
     TASK_ID: task.id,
     PR_BRANCH_NAME: task.prBranch,
     UPSTASH_REDIS_REST_URL: config.upstashRedisRestUrl || process.env.UPSTASH_REDIS_REST_URL || "",
     UPSTASH_REDIS_TOKEN: config.upstashRedisToken || process.env.UPSTASH_REDIS_TOKEN || "",
   };
 
-  const child = spawn(
-    "pnpm",
-    ["--filter", "agent-runner", "sandbox", `--repo=${repo}`, `--branch=${branch}`, `--task-id=${task.id}`],
-    { cwd: repoRoot, env, stdio: "ignore", detached: true },
-  );
+  const sandboxArgs = [
+    "--filter",
+    "agent-runner",
+    "sandbox",
+    `--repo=${repo}`,
+    `--branch=${branch}`,
+    `--task-id=${task.id}`,
+    `--template=${config.e2bTemplate || "base"}`,
+  ];
+  if (prompt) {
+    sandboxArgs.push(`--prompt=${prompt}`);
+    env.TASK_PROMPT = prompt;
+  }
+
+  const child = spawn("pnpm", sandboxArgs, { cwd: repoRoot, env, stdio: "ignore", detached: true });
 
   child.unref();
 

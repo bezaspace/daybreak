@@ -16,6 +16,7 @@ export interface DaybreakConfig {
   daytonaApiUrl?: string;
   daytonaTarget?: string;
   e2bApiKey?: string;
+  e2bTemplate?: string;
   githubToken?: string;
   githubAppId?: string;
   githubWebhookSecret?: string;
@@ -112,6 +113,7 @@ export function loadConfig(envPath?: string): DaybreakConfig {
     daytonaApiUrl: get("DAYTONA_API_URL"),
     daytonaTarget: get("DAYTONA_TARGET"),
     e2bApiKey: get("E2B_API_KEY"),
+    e2bTemplate: get("E2B_TEMPLATE") || "base",
     githubToken: get("GITHUB_TOKEN"),
     githubAppId: get("GITHUB_APP_ID"),
     githubWebhookSecret: get("GITHUB_WEBHOOK_SECRET"),

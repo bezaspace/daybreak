@@ -2,7 +2,7 @@
 
 An open-source, cloud-native developer agent platform that autonomously plans, writes, executes, tests, and ships production software. Ingests natural-language prompts, GitHub Issues, or PR review comments; provisions an isolated Linux execution sandbox; and iterates toward a solution until tests pass and a pull request is submitted. Built with enterprise transparency, deep observability, and **time-travel state rewinding** at its core — every model prompt, token count, tool latency, and reasoning step is traceable, and a human can pause, rewind the agent's execution tree to any step, edit the context, and spawn a parallel attempt branch without starting over.
 
-**Status**: Phase 0 complete; Phase 1 local MVP implemented with E2B sandboxing, Upstash streaming, PR delivery, and Supabase persistence.
+**Status**: Phase 0 complete; Phase 1 local MVP implemented with E2B sandboxing (including a `daybreak-browser` template for Playwright/Chromium), Upstash streaming, PR delivery, Supabase persistence, and the browser tool streaming screenshots to the UI.
 **Started**: 2026-08-01
 
 ---
@@ -22,9 +22,9 @@ This is a learning and demonstration project, not a product to sell.
 A user (or a GitHub Issue, or a PR review comment) gives Daybreak a task. The platform:
 
 1. **Triggers** via the local React dashboard or a `curl` to the local Hono control plane (`POST /api/tasks`). The control plane provisions an E2B sandbox and opens an SSE stream from Upstash Redis.
-2. **Provisions a sandbox** — invokes the E2B SDK to launch the `base` template and installs Node 22 at startup.
+2. **Provisions a sandbox** — invokes the E2B SDK to launch the `base` (or a pre-built `daybreak-browser`) template. The `daybreak-browser` template includes Node 22, Chromium, and `playwright-core` so the agent can run the browser tool without runtime installation.
 3. **Prepares the workspace** — inside the sandbox, the Pi SDK agent clones the target repo, configures bot committer details, and checks out the target branch.
-4. **Iterates** — analyzes the codebase with `read` and `bash`, parses errors, applies fixes with `edit`/`write`, and re-runs tests. Events stream live to the React dashboard over Upstash Redis via a Hono SSE endpoint.
+4. **Iterates** — analyzes the codebase with `read` and `bash`, parses errors, applies fixes with `edit`/`write`, and re-runs tests. The `browser` tool can navigate pages, take screenshots, read text/HTML, click/fill elements, and evaluate JavaScript. Screenshot events stream to the React dashboard over Upstash Redis via a Hono SSE endpoint.
 5. **Delivers** — creates a feature branch (e.g., `daybreak/<task-id>`), commits and pushes the fix there, then the control plane opens a Pull Request via the GitHub API. `main`/`master` are protected by default.
 6. **Monitors** — the UI receives the `task_complete` or `task_failed` event and shows the final status. Every task and event is persisted to Supabase Postgres so the dashboard survives control-plane restarts. Webhook listeners for CI/review are deferred.
 

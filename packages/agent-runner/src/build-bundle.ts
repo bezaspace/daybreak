@@ -14,7 +14,7 @@ async function main() {
     format: "cjs",
     target: "node20",
     outfile,
-    external: ["node:*"],
+    external: ["node:*", "playwright-core", "chromium-bidi", "chromium-bidi/*", "fsevents"],
     logLevel: "warning",
   });
 

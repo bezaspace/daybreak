@@ -31,7 +31,8 @@ Free providers are used wherever possible. For paid fallbacks, the target model 
 ### E2B
 - The free Hobby tier provides $100 in one-time credits before any paid usage begins.
 - After credits are consumed, sandbox compute (vCPU/RAM) and snapshot storage are metered; for current rates see https://e2b.dev/pricing.
-- A single short task that runs for ~1 minute costs a small fraction of a cent, but Node 22 installation and large snapshots are the main cost drivers to measure.
+- The default `base` template ships Node 20; installing Node 22 at sandbox startup adds ~30–60 seconds of CPU time per run. The pre-built `daybreak-browser` template bakes in Node 22, Chromium, and `playwright-core`, eliminating per-run installation and improving cold-start time.
+- The `daybreak-browser` template uses 2 vCPU / 1536 MB RAM, which is within the free-tier allowance and is required for Chromium's V8 renderer to avoid OOM.
 - Time-travel snapshots are the main wildcard: a full filesystem snapshot per turn is expensive, so Phase 4 should benchmark snapshot size and latency before enabling per-turn snapshots.
 
 ### Supabase

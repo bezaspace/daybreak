@@ -20,6 +20,7 @@ Daybreak needs several credentials across its lifecycle. This document explains 
 
 ### E2B
 - `E2B_API_KEY` — create/destroy sandboxes.
+- `E2B_TEMPLATE` — optional sandbox template name. The built-in `daybreak-browser` template ships Node 22, Chromium, and `playwright-core` for the browser tool. Leave unset or set to `base` for the default template.
 - The agent should never read this from inside a sandbox. The control plane injects a short-lived sandbox API key only when spawning a workspace.
 
 ### GitHub

@@ -2,6 +2,7 @@ import { createAgentSession, SessionManager, type AgentSession, type AgentSessio
 import type { DaybreakConfig, TaskMetrics, TaskResult, ToolCallRecord } from "@daybreak/shared";
 import { SafetyMiddleware } from "@daybreak/shared";
 import pc from "picocolors";
+import { browserTool } from "./browser-tool.js";
 import { createModelRuntime, getFallbackModel } from "./llm.js";
 import { MetricsCollector } from "./metrics.js";
 
@@ -36,7 +37,8 @@ export class TaskRunner {
     const { session } = await createAgentSession({
       modelRuntime,
       model,
-      tools: ["read", "bash", "edit", "write"],
+      tools: ["read", "bash", "edit", "write", "browser"],
+      customTools: [browserTool],
       sessionManager: SessionManager.inMemory(cwd),
       cwd,
     });

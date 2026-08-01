@@ -4,6 +4,7 @@ import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { execSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import pc from "picocolors";
+import { closeBrowser } from "./browser-tool.js";
 import { TaskRunner } from "./session.js";
 import { createStreamPublisher } from "./stream.js";
 
@@ -25,7 +26,7 @@ function getDefaultPrompt(): string {
 }
 
 const prompt = process.env.TASK_PROMPT || getDefaultPrompt();
-const systemPrompt = process.env.TASK_SYSTEM_PROMPT || `You are Daybreak, an autonomous coding agent running in an E2B sandbox. Investigate, fix, verify, then${pushAfterFix ? " commit and push to a feature branch" : " report the fix"}.`;
+const systemPrompt = process.env.TASK_SYSTEM_PROMPT || `You are Daybreak, an autonomous coding agent running in an E2B sandbox. You have read, bash, edit, write, and browser tools. Investigate, fix, verify, then${pushAfterFix ? " commit and push to a feature branch" : " report the fix"}. Use the browser tool to visually verify web apps when relevant.`;
 
 function writeGitAskpassScript(path: string) {
   const script = `#!/bin/bash
@@ -41,6 +42,17 @@ function run(cmd: string, cwd: string, stdio: "inherit" | "pipe" = "pipe", env?:
   return execSync(cmd, { cwd, stdio, maxBuffer: 10 * 1024 * 1024, shell: "/usr/bin/bash", env });
 }
 
+function omitScreenshot<T>(obj: T): T {
+  if (!obj || typeof obj !== "object") return obj;
+  const clone = JSON.parse(JSON.stringify(obj)) as Record<string, unknown>;
+  if (clone.details && typeof clone.details === "object") {
+    const details = { ...(clone.details as Record<string, unknown>) };
+    delete details.screenshotBase64;
+    clone.details = details;
+  }
+  return clone as T;
+}
+
 function toStreamData(event: AgentSessionEvent): unknown {
   switch (event.type) {
     case "message_update":
@@ -53,9 +65,18 @@ function toStreamData(event: AgentSessionEvent): unknown {
     case "tool_execution_start":
       return { toolCallId: event.toolCallId, toolName: event.toolName, args: event.args };
     case "tool_execution_end":
-      return { toolCallId: event.toolCallId, toolName: event.toolName, isError: event.isError, result: event.result };
+      return {
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        isError: event.isError,
+        result: event.toolName === "browser" ? omitScreenshot(event.result) : event.result,
+      };
     case "tool_execution_update":
-      return { toolCallId: event.toolCallId, toolName: event.toolName, partialResult: event.partialResult };
+      return {
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        partialResult: event.toolName === "browser" ? omitScreenshot(event.partialResult) : event.partialResult,
+      };
     case "auto_retry_start":
       return { attempt: event.attempt, maxAttempts: event.maxAttempts, errorMessage: event.errorMessage };
     case "auto_retry_end":
@@ -100,7 +121,19 @@ async function main() {
       cwd: targetDir,
       systemPrompt,
       autoApprove,
-      onEvent: (event) => publisher.publish(event.type, toStreamData(event)),
+      onEvent: (event) => {
+        publisher.publish(event.type, toStreamData(event));
+        if (event.type === "tool_execution_update" && event.toolName === "browser") {
+          const partial = event.partialResult as { details?: { screenshotBase64?: string; url?: string; mimeType?: string } } | undefined;
+          if (partial?.details?.screenshotBase64) {
+            publisher.publish("browser_screenshot", {
+              url: partial.details.url,
+              screenshot: partial.details.screenshotBase64,
+              mimeType: partial.details.mimeType || "image/png",
+            });
+          }
+        }
+      },
     });
 
     console.log(pc.bold("\n=== Task result ==="));
@@ -123,6 +156,7 @@ async function main() {
     publisher.publish("task_failed", { error: errorMessage });
     process.exitCode = 1;
   } finally {
+    await closeBrowser();
     await publisher.close();
   }
 }

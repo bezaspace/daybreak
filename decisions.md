@@ -81,6 +81,7 @@
 **Consequences:**
 - We depend on E2B's API stability and free-tier credit availability.
 - The default `base` template ships Node 20; the runner installs Node 22 at sandbox startup to match the bundled `undici`/`pi-agent-core` runtime.
+- For the browser/Playwright tool, the `base` template's ~418 MiB memory limit caused Chromium's V8 renderer to OOM. A custom `daybreak-browser` E2B template with 2 vCPU / 1536 MB RAM, Node 22, Chromium, and `playwright-core` is built once and used by `sandbox.ts --template=daybreak-browser` or `E2B_TEMPLATE=daybreak-browser`.
 - Per-turn snapshots for time-travel may be expensive or slow; we must measure and fall back if needed.
 
 ---
@@ -243,8 +244,9 @@
 **Rationale:** The README promises browser-based visual verification. Without it, the MVP cannot handle web-app tasks or visually confirm UI changes.
 
 **Consequences:**
-- Sandbox image grows and cold start may increase slightly.
-- Screenshots must be streamed efficiently to the UI.
+- Sandbox image grows and cold start may increase slightly. To avoid installing Chromium at runtime, a custom `daybreak-browser` E2B template is built with Node 22, Chromium, and `playwright-core` pre-installed.
+- The `base` template's 512 MB memory limit was too small for Chromium's V8 renderer; the `daybreak-browser` template is provisioned with 1536 MB RAM.
+- Screenshots are emitted as `browser_screenshot` events and streamed to the UI over the existing Upstash Redis/SSE channel.
 
 ---
 
