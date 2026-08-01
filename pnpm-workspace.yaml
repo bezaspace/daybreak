@@ -4,3 +4,8 @@ allowBuilds:
   '@google/genai': true
   esbuild: true
   protobufjs: true
+minimumReleaseAgeExclude:
+  - '@daytona/analytics-api-client@0.203.0'
+  - '@daytona/api-client@0.203.0'
+  - '@daytona/sdk@0.203.0'
+  - '@daytona/toolbox-api-client@0.203.0'

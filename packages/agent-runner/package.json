@@ -12,6 +12,8 @@
   },
   "scripts": {
     "spike": "tsx src/spike.ts",
+    "task": "tsx src/run-task.ts",
+    "sandbox": "tsx src/sandbox.ts",
     "lint": "tsc --noEmit && echo 'agent-runner lint OK'",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
@@ -20,6 +22,7 @@
   },
   "dependencies": {
     "@daybreak/shared": "workspace:*",
+    "@daytona/sdk": "^0.203.0",
     "@earendil-works/pi-agent-core": "0.83.0",
     "@earendil-works/pi-ai": "0.83.0",
     "@earendil-works/pi-coding-agent": "0.83.0",
