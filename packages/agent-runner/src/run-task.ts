@@ -85,6 +85,16 @@ function toStreamData(event: AgentSessionEvent): unknown {
       return { willRetry: event.willRetry };
     case "bash_execution_update":
       return { id: event.id, delta: event.delta };
+    case "compaction_start":
+      return { reason: event.reason };
+    case "compaction_end":
+      return {
+        reason: event.reason,
+        aborted: event.aborted,
+        willRetry: event.willRetry,
+        tokensBefore: event.result?.tokensBefore,
+        firstKeptEntryId: event.result?.firstKeptEntryId,
+      };
     default:
       return {};
   }

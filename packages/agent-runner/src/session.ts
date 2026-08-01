@@ -1,4 +1,4 @@
-import { createAgentSession, SessionManager, type AgentSession, type AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import { createAgentSession, SessionManager, SettingsManager, type AgentSession, type AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import type { DaybreakConfig, TaskMetrics, TaskResult, ToolCallRecord } from "@daybreak/shared";
 import { SafetyMiddleware } from "@daybreak/shared";
 import pc from "picocolors";
@@ -34,12 +34,21 @@ export class TaskRunner {
 
     const { modelRuntime, model } = await createModelRuntime(this.config.llm, this.config.llmFallback);
 
+    const settingsManager = SettingsManager.inMemory({
+      compaction: {
+        enabled: this.config.compactionEnabled,
+        reserveTokens: this.config.compactionReserveTokens,
+        keepRecentTokens: this.config.compactionKeepRecentTokens,
+      },
+    });
+
     const { session } = await createAgentSession({
       modelRuntime,
       model,
       tools: ["read", "bash", "edit", "write", "browser"],
       customTools: [browserTool],
       sessionManager: SessionManager.inMemory(cwd),
+      settingsManager,
       cwd,
     });
 
@@ -162,6 +171,20 @@ export class TaskRunner {
         }
         case "agent_end": {
           console.log(pc.yellow(`[agent end] willRetry=${event.willRetry}`));
+          break;
+        }
+        case "compaction_start": {
+          console.log(pc.yellow(`[compaction start] reason=${event.reason}`));
+          break;
+        }
+        case "compaction_end": {
+          if (event.aborted) {
+            console.log(pc.red(`[compaction end] aborted`));
+          } else if (event.result) {
+            console.log(pc.green(`[compaction end] tokensBefore=${event.result.tokensBefore} firstKeptEntry=${event.result.firstKeptEntryId}`));
+          } else {
+            console.log(pc.yellow(`[compaction end] no compaction needed`));
+          }
           break;
         }
       }

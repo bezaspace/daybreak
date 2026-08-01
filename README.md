@@ -50,12 +50,12 @@ The differentiators that make this more than "another coding agent":
 ## Build Plan (MVP vertical slice first, then layer the differentiators)
 
 1. **Phase 0** — Repo + `PROJECT_PLAN.md` + `PROGRESS.md`. Pi SDK spike: prove `Agent` + `read`/`write`/`edit`/`bash` tools run against an OpenAI-compatible LLM provider.
-2. **Phase 1 (MVP)** — Dashboard trigger → local Hono control plane → E2B sandbox → Pi agent clones a repo, runs tests, edits, pushes the fix to a `daybreak/<task-id>` feature branch, the control plane opens a GitHub PR, and every event is persisted to Supabase Postgres. Streams events to a minimal React + Vite UI via Upstash Redis + Hono SSE. *Demoable on its own.*
+2. **Phase 1 (MVP)** — Dashboard trigger → local Hono control plane → E2B sandbox → Pi agent clones a repo, runs tests, edits, pushes the fix to a `daybreak/<task-id>` feature branch, the control plane opens a GitHub PR, and every event is persisted to Supabase Postgres. Streams events to a minimal React + Vite UI via Upstash Redis + Hono SSE. Pi context compaction and `MAX_TURNS`/`MAX_WALL_CLOCK`/`MAX_COST` circuit breakers are configured. *Demoable on its own.*
 3. **Phase 2** — OTel instrumentation → Langfuse; DAG trace visualizer in the dashboard.
 4. **Phase 3** — GitHub App: issue/PR-comment triggers, scoped tokens, review-loop listener.
 5. **Phase 4** — Time-travel: per-turn E2B snapshots + Pi state serialization → rewind + branch UI. *(The headline feature, deliberately late — it's the hardest part.)*
 6. **Phase 5** — CI self-healing: webhook on failed check runs → wake sandbox → fix commit.
-7. **Phase 6** — Context compaction, resource circuit breakers (20-min wall-clock, 40-turn cap), sensitive-file denylist (`.env`, `*.pem`, `.ssh/*`), branch-protection locks (no commits to `main`/`master`).
+7. **Phase 6** — Scale, idempotency, multi-tenancy, and security hardening beyond the local MVP.
 
 Every milestone should be demoable on its own. Track cost, latency, and token usage from day one.
 

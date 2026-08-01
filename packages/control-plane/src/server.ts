@@ -138,6 +138,12 @@ app.post("/api/tasks", async (c) => {
     PR_BRANCH_NAME: task.prBranch,
     UPSTASH_REDIS_REST_URL: config.upstashRedisRestUrl || process.env.UPSTASH_REDIS_REST_URL || "",
     UPSTASH_REDIS_TOKEN: config.upstashRedisToken || process.env.UPSTASH_REDIS_TOKEN || "",
+    MAX_TURNS: String(config.maxTurns),
+    MAX_WALL_CLOCK_MINUTES: String(config.maxWallClockMinutes),
+    MAX_COST_USD: String(config.maxCostUsd),
+    COMPACTION_ENABLED: String(config.compactionEnabled),
+    COMPACTION_RESERVE_TOKENS: String(config.compactionReserveTokens),
+    COMPACTION_KEEP_RECENT_TOKENS: String(config.compactionKeepRecentTokens),
   };
 
   const sandboxArgs = [

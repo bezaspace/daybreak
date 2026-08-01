@@ -80,6 +80,9 @@ async function main() {
       MAX_COST_USD: String(config.maxCostUsd),
       REQUIRE_APPROVAL_FOR_DESTRUCTIVE: "false",
       DENYLIST_PATTERNS: config.denylistPatterns.join(","),
+      COMPACTION_ENABLED: String(config.compactionEnabled),
+      COMPACTION_RESERVE_TOKENS: String(config.compactionReserveTokens),
+      COMPACTION_KEEP_RECENT_TOKENS: String(config.compactionKeepRecentTokens),
     },
   });
 

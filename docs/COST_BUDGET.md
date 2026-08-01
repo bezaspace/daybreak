@@ -20,6 +20,7 @@ Free providers are used wherever possible. For paid fallbacks, the target model 
 - Typical agent turn: ~2K input tokens + ~1K output tokens.
 - At OpenAI `gpt-4o-mini` rates: ~$0.0005 per prompt + $0.0006 per completion = **~$0.0011 per turn**.
 - A 40-turn task therefore costs roughly **$0.044**, well under the default `MAX_COST_USD=0.50`.
+- Context compaction triggers a summarization LLM call. On a 32K-token summary this may add ~8K input + ~2K output tokens, or **~$0.006 per compaction**. Set `MAX_COST_USD` generously when `COMPACTION_ENABLED=true` on long tasks.
 
 ## Infrastructure burn rates
 

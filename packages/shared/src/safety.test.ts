@@ -9,6 +9,9 @@ const config: DaybreakConfig = {
   protectedBranches: ["main", "master"],
   denylistPatterns: [".env", ".env.*", "*.pem", ".ssh/**", "**/*secret*"],
   requireApprovalForDestructive: true,
+  compactionEnabled: true,
+  compactionReserveTokens: 4000,
+  compactionKeepRecentTokens: 8000,
 };
 
 describe("isSensitivePath", () => {

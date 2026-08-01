@@ -347,6 +347,19 @@
 
 ---
 
+## D31. Context compaction and circuit breakers in Phase 1
+
+**Decision:** Wire Pi's built-in context compaction into `session.ts` from Phase 1, controlled by `COMPACTION_ENABLED`, `COMPACTION_RESERVE_TOKENS`, and `COMPACTION_KEEP_RECENT_TOKENS` environment variables. The existing `MAX_TURNS`, `MAX_WALL_CLOCK_MINUTES`, and `MAX_COST_USD` circuit breakers continue to abort the task when exceeded.
+
+**Rationale:** Long agent runs on non-trivial repos will exceed the context window. Relying on the Pi SDK's compaction keeps the implementation aligned with the kernel and avoids building a custom summarizer. The circuit breakers prevent runaway cost or time.
+
+**Consequences:**
+- Compaction events (`compaction_start`/`compaction_end`) are emitted to the stream and persisted, so the dashboard can show when context was summarized.
+- Compaction consumes extra LLM tokens/cost (a summarization call), so `MAX_COST_USD` must be set high enough to allow it.
+- Tuning `reserveTokens`/`keepRecentTokens` is model- and task-dependent; the defaults (4000/8000) are conservative for small-context models.
+
+---
+
 ## D30. Open questions that can change these decisions
 
 - Can `pi-agent-core` serialize and fork sessions cleanly?

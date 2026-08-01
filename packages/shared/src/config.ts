@@ -12,6 +12,9 @@ export interface DaybreakConfig {
   protectedBranches: string[];
   denylistPatterns: string[];
   requireApprovalForDestructive: boolean;
+  compactionEnabled: boolean;
+  compactionReserveTokens: number;
+  compactionKeepRecentTokens: number;
   daytonaApiKey?: string;
   daytonaApiUrl?: string;
   daytonaTarget?: string;
@@ -33,6 +36,9 @@ const DEFAULT_MAX_TURNS = 40;
 const DEFAULT_MAX_WALL_CLOCK_MINUTES = 20;
 const DEFAULT_MAX_COST_USD = 0.5;
 const DEFAULT_PROTECTED_BRANCHES = ["main", "master"];
+const DEFAULT_COMPACTION_ENABLED = true;
+const DEFAULT_COMPACTION_RESERVE_TOKENS = 4000;
+const DEFAULT_COMPACTION_KEEP_RECENT_TOKENS = 8000;
 
 export const DEFAULT_DENYLIST_PATTERNS: string[] = [
   ".env",
@@ -100,6 +106,8 @@ export function loadConfig(envPath?: string): DaybreakConfig {
     ? get("DENYLIST_PATTERNS")!.split(",").map((p) => p.trim()).filter(Boolean)
     : DEFAULT_DENYLIST_PATTERNS;
 
+  const compactionEnabled = get("COMPACTION_ENABLED") !== "false";
+
   return {
     llm: primary,
     llmFallback: fallback,
@@ -109,6 +117,9 @@ export function loadConfig(envPath?: string): DaybreakConfig {
     protectedBranches,
     denylistPatterns,
     requireApprovalForDestructive: get("REQUIRE_APPROVAL_FOR_DESTRUCTIVE") !== "false",
+    compactionEnabled,
+    compactionReserveTokens: parseIntEnv("COMPACTION_RESERVE_TOKENS", DEFAULT_COMPACTION_RESERVE_TOKENS),
+    compactionKeepRecentTokens: parseIntEnv("COMPACTION_KEEP_RECENT_TOKENS", DEFAULT_COMPACTION_KEEP_RECENT_TOKENS),
     daytonaApiKey: get("DAYTONA_API_KEY"),
     daytonaApiUrl: get("DAYTONA_API_URL"),
     daytonaTarget: get("DAYTONA_TARGET"),
