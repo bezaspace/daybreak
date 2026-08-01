@@ -100,7 +100,7 @@ Progress is measured by the completion of demoable vertical slices and objective
 - [x] 4.10. **PR delivery path:** Agent pushes to a `daybreak/<task-id>` feature branch; the control plane opens a PR via GitHub API (`POST /repos/{owner}/{repo}/pulls`) using `GITHUB_TOKEN`.
 - [x] 4.11. **Control channel (MVP):** Control plane issues the spawn command and `TASK_ID` to the E2B sandbox; the sandbox pushes all events to Upstash Redis. Interactive commands and bidirectional control are deferred.
 - [x] 4.12. **UI streaming:** Browser connects to the Hono SSE endpoint `/api/tasks/:id/stream` and renders events live. WebSocket migration is deferred to a later phase if needed.
-- [ ] 4.13. Run the Phase 0 eval harness against this local MVP and record wall-clock time, token count, and $-cost per task.
+- [x] 4.13. Run the Phase 0 eval harness against this local MVP and record wall-clock time, token count, and $-cost per task.
 - [ ] 4.14. **Exit criteria:** From the local dashboard, click "Fix failing test on repo X" → watch live terminal and browser stream → a PR appears on GitHub. The PR contains a real fix that passes CI, no `.env` was read, the branch is not `main`, and `MAX_TURNS`/`MAX_COST` are enforced.
 
 ---

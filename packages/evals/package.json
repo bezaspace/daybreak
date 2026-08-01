@@ -12,6 +12,7 @@
   },
   "scripts": {
     "eval": "tsx src/index.ts",
+    "eval:e2e": "tsx src/e2e.ts",
     "lint": "tsc --noEmit && echo 'evals lint OK'",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",

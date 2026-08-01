@@ -37,6 +37,12 @@ Daybreak needs several credentials across its lifecycle. This document explains 
 
 The repo uses a denylist that blocks the agent from reading files matching sensitive patterns such as `.env`, `*.pem`, `*.key`, `.npmrc`, and paths containing `secret`/`token`/`password`. CI rejects pushes that add unencrypted secret files.
 
+### Eval harness
+
+- `CONTROL_PLANE_URL` — optional; defaults to `http://localhost:8787` for `pnpm eval:e2e`.
+- `EVAL_TARGET_REPO` and `EVAL_TARGET_BRANCH` — optional; the repo/branch the E2E eval harness tests (default `https://github.com/bezaspace/daybreak-target` `main`).
+- `EVAL_TIMEOUT_MS` — optional timeout for each E2E eval case (default 10 minutes).
+
 ## Generating `.env` locally
 
 ```bash

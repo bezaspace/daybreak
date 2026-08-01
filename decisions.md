@@ -360,6 +360,19 @@
 
 ---
 
+## D32. E2E eval harness against the control-plane + E2B pipeline
+
+**Decision:** Run the Phase 0 eval harness end-to-end through the real control plane and E2B sandbox (`packages/evals/src/e2e.ts`) rather than only through the local `TaskRunner`.
+
+**Rationale:** Local `TaskRunner` evals prove agent logic but do not exercise sandbox provisioning, git push, GitHub PR creation, Upstream Redis streaming, or Supabase persistence. The E2E harness gives the true MVP exit-criteria signal.
+
+**Consequences:**
+- The E2E harness triggers `POST /api/tasks`, polls for completion, reads stream events, and records wall-clock, turns, tool calls, token count, cost, and the PR URL.
+- Each run creates a real PR on the target repo (`bezaspace/daybreak-target`), so evals need an isolated fixture or a dedicated eval target repo.
+- The local `TaskRunner` mode is retained for fast iteration and debugging agent behavior without E2B spend.
+
+---
+
 ## D30. Open questions that can change these decisions
 
 - Can `pi-agent-core` serialize and fork sessions cleanly?

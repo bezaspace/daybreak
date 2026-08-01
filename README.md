@@ -59,6 +59,21 @@ The differentiators that make this more than "another coding agent":
 
 Every milestone should be demoable on its own. Track cost, latency, and token usage from day one.
 
+## Evaluation
+
+`packages/evals` contains the Daybreak eval harness. Run it locally against a fixture for fast iteration (`pnpm --filter @daybreak/evals eval`) or end-to-end through the full control-plane + E2B pipeline (`pnpm --filter @daybreak/evals eval:e2e`). The E2E mode triggers `POST /api/tasks`, waits for `task_complete`, and records wall-clock time, turn count, tool calls, total tokens, and the resulting PR URL. Sample output for the `failing-sum` fixture:
+
+```bash
+pnpm --filter @daybreak/evals eval:e2e
+# --- failing-sum ---
+# Task <id> started for https://github.com/bezaspace/daybreak-target @ main
+# Completed in 14161ms
+# PR: https://github.com/bezaspace/daybreak-target/pull/4
+# Metrics: { turns: 7, toolCalls: 9, estimatedCostUsd: 0, totalTokens: 21756, durationMs: 14161 }
+```
+
+The summary table is printed at the end. Exit code is non-zero when any case fails or times out.
+
 ## Notes
 
 - The *product category* (autonomous coding agent) is crowded — Devin, OpenHands, SWE-agent, Aider, Cursor, Pi's own coding-agent. What's actually novel here is the **specific combination**: time-travel branching + full OTel lineage + $0 free-tier + open-source + GitHub-native CI self-healing. The combination and the transparency thesis are the differentiator, not the concept itself.
