@@ -11,14 +11,21 @@ const workDir = process.env.WORK_DIR || "/tmp";
 const targetRepoUrl = process.env.TARGET_REPO_URL;
 const targetBranch = process.env.TARGET_BRANCH || "main";
 const targetDir = process.env.TARGET_DIR || `${workDir}/target`;
+const taskId = process.env.TASK_ID || `task-${Date.now()}`;
+const prBranch = process.env.PR_BRANCH_NAME || `daybreak/${taskId}`;
 const autoApprove = process.env.AUTO_APPROVE !== "false";
 const pushAfterFix = process.env.PUSH_AFTER_FIX !== "false";
 const gitAskpassPath = process.env.GIT_ASKPASS || `${workDir}/.git-askpass.sh`;
 
-const defaultPrompt = `You are in a git repository at ${targetDir}. There is a failing test. Read the source and test files, understand the bug, make the minimal fix, and run the test command until it passes.${pushAfterFix ? ` Then stage the change with "git add -A", commit with "git -c user.name='Daybreak Bot' -c user.email='daybreak@example.com' commit -m 'fix: <concise message>'", and push to origin ${targetBranch}. Do not create any new branches.` : ""}`;
+function getDefaultPrompt(): string {
+  const pushInstructions = pushAfterFix
+    ? ` Then create and check out a new branch named "${prBranch}" with "git checkout -b ${prBranch}", stage the change with "git add -A", commit with "git -c user.name='Daybreak Bot' -c user.email='daybreak@example.com' commit -m 'fix: <concise message>'", and push to origin ${prBranch} with "git push -u origin ${prBranch}". Do not push to ${targetBranch} directly.`
+    : "";
+  return `You are in a git repository at ${targetDir}. There is a failing test. Read the source and test files, understand the bug, make the minimal fix, and run the test command until it passes.${pushInstructions}`;
+}
 
-const prompt = process.env.TASK_PROMPT || defaultPrompt;
-const systemPrompt = process.env.TASK_SYSTEM_PROMPT || `You are Daybreak, an autonomous coding agent running in an E2B sandbox. Investigate, fix, verify, then${pushAfterFix ? " commit and push" : " report the fix"}.`;
+const prompt = process.env.TASK_PROMPT || getDefaultPrompt();
+const systemPrompt = process.env.TASK_SYSTEM_PROMPT || `You are Daybreak, an autonomous coding agent running in an E2B sandbox. Investigate, fix, verify, then${pushAfterFix ? " commit and push to a feature branch" : " report the fix"}.`;
 
 function writeGitAskpassScript(path: string) {
   const script = `#!/bin/bash
@@ -75,7 +82,7 @@ async function main() {
     upstashRedisToken: config.upstashRedisToken,
   });
 
-  publisher.publish("task_start", { repo: targetRepoUrl, branch: targetBranch, workDir });
+  publisher.publish("task_start", { repo: targetRepoUrl, branch: targetBranch, prBranch, workDir });
 
   if (process.env.GITHUB_TOKEN) {
     writeGitAskpassScript(gitAskpassPath);

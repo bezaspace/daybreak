@@ -212,13 +212,13 @@
 
 ## D17. Branch protection: never commit to `main`/`master`
 
-**Decision:** The agent is hard-blocked from committing to `main`, `master`, or any protected branch by default. Every task creates a feature branch.
+**Decision:** The agent is hard-blocked from committing to `main`, `master`, or any protected branch by default. Every task creates a feature branch and the control plane opens a Pull Request for it.
 
 **Rationale:** Prevents accidental or adversarial destruction of the default branch.
 
 **Consequences:**
 - The PR delivery path is the normal way to land code.
-- For the Phase 1 local MVP slice, an explicit `PROTECTED_BRANCHES=__none__` override and per-task authorization allow direct pushes to the target branch (e.g., `main`) when the operator opts in. This override is removed when the GitHub App/PR flow lands in Phase 3.
+- A temporary `PROTECTED_BRANCHES=__none__` override was used during the first Phase 1 slice to enable direct `main` pushes while the sandbox flow was being proven. That override is removed now that the agent creates `daybreak/<task-id>` branches and the control plane opens PRs via the GitHub API.
 - Some operations (e.g., automated releases) may need explicit out-of-scope handling.
 
 ---

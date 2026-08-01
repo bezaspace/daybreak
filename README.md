@@ -25,7 +25,7 @@ A user (or a GitHub Issue, or a PR review comment) gives Daybreak a task. The pl
 2. **Provisions a sandbox** — invokes the E2B SDK to launch the `base` template and installs Node 22 at startup.
 3. **Prepares the workspace** — inside the sandbox, the Pi SDK agent clones the target repo, configures bot committer details, and checks out the target branch.
 4. **Iterates** — analyzes the codebase with `read` and `bash`, parses errors, applies fixes with `edit`/`write`, and re-runs tests. Events stream live to the React dashboard over Upstash Redis via a Hono SSE endpoint.
-5. **Delivers** — commits and pushes the fix to the target branch (direct `main` push for this slice, per user authorization). Pull-request creation is deferred to Phase 3.
+5. **Delivers** — creates a feature branch (e.g., `daybreak/<task-id>`), commits and pushes the fix there, then the control plane opens a Pull Request via the GitHub API. `main`/`master` are protected by default.
 6. **Monitors** — the UI receives the `task_complete` or `task_failed` event and shows the final status. Webhook listeners for CI/review are deferred.
 
 The differentiators that make this more than "another coding agent":

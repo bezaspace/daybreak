@@ -12,7 +12,9 @@ interface Task {
   id: string;
   repo: string;
   branch: string;
+  prBranch?: string;
   status: string;
+  prUrl?: string;
 }
 
 function formatEvent(event: StreamEvent): string {
@@ -53,20 +55,26 @@ export function App() {
   const [taskId, setTaskId] = useState<string | null>(getInitialTaskId());
   const [events, setEvents] = useState<StreamEvent[]>([]);
   const [status, setStatus] = useState<string>("idle");
+  const [prUrl, setPrUrl] = useState<string | null>(null);
   const terminalRef = useRef<HTMLPreElement>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
 
-  useEffect(() => {
+  function loadTasks() {
     fetch("/api/tasks")
       .then((r) => r.json())
       .then((data) => setTasks(Array.isArray(data) ? data : []))
       .catch(() => {});
+  }
+
+  useEffect(() => {
+    loadTasks();
   }, []);
 
   useEffect(() => {
     if (!taskId) return;
     setEvents([]);
     setStatus("running");
+    setPrUrl(null);
 
     const es = new EventSource(`/api/tasks/${taskId}/stream`);
     es.onmessage = (message) => {
@@ -74,8 +82,19 @@ export function App() {
       try {
         const event = JSON.parse(message.data) as StreamEvent;
         setEvents((prev) => [...prev, event]);
-        if (event.type === "task_complete" || event.type === "task_failed") {
-          setStatus(event.type === "task_complete" ? "complete" : "failed");
+        if (event.type === "pr_created") {
+          const data = event.data as { prUrl?: string };
+          if (data.prUrl) {
+            setPrUrl(data.prUrl);
+            loadTasks();
+            es.close();
+          }
+        }
+        if (event.type === "task_complete") {
+          setStatus("complete");
+        }
+        if (event.type === "task_failed") {
+          setStatus("failed");
           es.close();
         }
       } catch {
@@ -141,6 +160,14 @@ export function App() {
       {taskId && (
         <p style={{ color: "#666" }}>
           Task: <code>{taskId}</code> · Status: <strong>{status}</strong>
+          {prUrl && (
+            <span>
+              {" · "}
+              <a href={prUrl} target="_blank" rel="noopener noreferrer">
+                View PR
+              </a>
+            </span>
+          )}
         </p>
       )}
 
@@ -166,6 +193,15 @@ export function App() {
         {tasks.map((t) => (
           <li key={t.id}>
             <code>{t.id}</code> — {t.repo} @ {t.branch} · {t.status}
+            {t.prBranch && ` · ${t.prBranch}`}
+            {t.prUrl && (
+              <span>
+                {" · "}
+                <a href={t.prUrl} target="_blank" rel="noopener noreferrer">
+                  PR
+                </a>
+              </span>
+            )}
           </li>
         ))}
       </ul>
