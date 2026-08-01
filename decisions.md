@@ -119,6 +119,7 @@
 **Consequences:**
 - 500MB limit requires retention/archival policy for old traces and events.
 - We must be careful with row counts and payload sizes for streamed events.
+- The Phase 1 schema adds `tasks` (task metadata and PR URL), `events` (per-task event stream), `sessions` (Pi state reference), and `checkpoints` (turn/snapshot references for time-travel). The control plane persists every event it reads from the Redis stream and serves `GET /api/tasks/:id/events` from Postgres.
 
 ---
 

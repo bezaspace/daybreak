@@ -34,8 +34,13 @@ Free providers are used wherever possible. For paid fallbacks, the target model 
 - A single short task that runs for ~1 minute costs a small fraction of a cent, but Node 22 installation and large snapshots are the main cost drivers to measure.
 - Time-travel snapshots are the main wildcard: a full filesystem snapshot per turn is expensive, so Phase 4 should benchmark snapshot size and latency before enabling per-turn snapshots.
 
-### Supabase / Langfuse
-- Database writes are batched per task, not per turn.
+### Supabase
+- The control plane inserts one `tasks` row per task and one `events` row per stream event (~300–500 events for a short fix run).
+- At ~400 events per task, 1,000 tasks/month = ~400K rows and ~200–400 MB depending on payload size, so the 500MB DB cap is the binding constraint before the 500K Edge Function limit.
+- The 1000-event Redis `LTRIM` cap and `MAX_TURNS` guardrail also bound Supabase row growth.
+- Retention/archival of old `events` rows will be added before moving out of the free tier.
+
+### Langfuse
 - Langfuse traces one span per turn; 40 turns × 100 tasks = 4K spans/day, under the 50K units/month quota if averaged.
 
 ## Circuit breakers

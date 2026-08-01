@@ -8,18 +8,18 @@ import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { serve } from "@hono/node-server";
+import {
+  getTasks,
+  getTask,
+  persistTask,
+  updateTask,
+  persistEvent,
+  getEvents,
+  type Task,
+  type StreamEvent,
+} from "./db.js";
 
-interface Task {
-  id: string;
-  repo: string;
-  branch: string;
-  prBranch: string;
-  status: "running" | "complete" | "failed";
-  startedAt: number;
-  endedAt?: number;
-  exitCode?: number;
-  prUrl?: string;
-}
+const repoRoot = resolve(import.meta.dirname ?? process.cwd(), "../..");
 
 function parseRepo(repoUrl: string): { owner: string; repo: string } | undefined {
   try {
@@ -59,18 +59,6 @@ async function createPullRequest(repoUrl: string, headBranch: string, baseBranch
   return data.html_url;
 }
 
-async function publishEvent(taskId: string, type: string, data: unknown) {
-  const redis = getRedis();
-  const event = { id: `${taskId}-pr`, taskId, type, timestamp: Date.now(), data };
-  const pipe = redis.pipeline();
-  pipe.rpush(`daybreak:stream:${taskId}`, JSON.stringify(event));
-  pipe.ltrim(`daybreak:stream:${taskId}`, -1000, -1);
-  await pipe.exec();
-}
-
-const tasks = new Map<string, Task>();
-const repoRoot = resolve(import.meta.dirname ?? process.cwd(), "../..");
-
 function getRedis() {
   const config = loadConfig();
   const url = config.upstashRedisRestUrl || process.env.UPSTASH_REDIS_REST_URL;
@@ -81,14 +69,50 @@ function getRedis() {
   return new Redis({ url, token });
 }
 
+async function publishToRedis(taskId: string, event: StreamEvent) {
+  const redis = getRedis();
+  const pipe = redis.pipeline();
+  pipe.rpush(`daybreak:stream:${taskId}`, JSON.stringify(event));
+  pipe.ltrim(`daybreak:stream:${taskId}`, -1000, -1);
+  await pipe.exec();
+}
+
+async function publishEvent(taskId: string, type: string, data: unknown) {
+  const event: StreamEvent = { id: `${taskId}-pr`, taskId, type, timestamp: Date.now(), data };
+  await persistEvent(taskId, event);
+  await publishToRedis(taskId, event);
+}
+
+const tasks = new Map<string, Task>();
+
+function taskFrom(body: { repo: string; branch: string; id?: string; prBranch?: string }): Task {
+  const id = body.id ?? randomUUID();
+  const prBranch = body.prBranch ?? `daybreak/${id}`;
+  return { id, repo: body.repo, branch: body.branch, prBranch, status: "running", startedAt: Date.now() };
+}
+
+async function syncEventsFromRedis(taskId: string) {
+  try {
+    const redis = getRedis();
+    const raw = await redis.lrange(`daybreak:stream:${taskId}`, 0, -1);
+    for (const item of raw) {
+      const event = typeof item === "string" ? (JSON.parse(item) as StreamEvent) : (item as StreamEvent);
+      await persistEvent(taskId, event);
+    }
+  } catch (error) {
+    console.error(`[control-plane] syncEventsFromRedis error for ${taskId}:`, error);
+  }
+}
+
 const app = new Hono();
 
 app.use("/api/*", cors({ origin: "*" }));
 
 app.get("/", (c) => c.text("Daybreak control plane"));
 
-app.get("/api/tasks", (c) => {
-  return c.json(Array.from(tasks.values()));
+app.get("/api/tasks", async (c) => {
+  const dbTasks = await getTasks();
+  return c.json(dbTasks.length ? dbTasks : Array.from(tasks.values()));
 });
 
 app.post("/api/tasks", async (c) => {
@@ -100,23 +124,22 @@ app.post("/api/tasks", async (c) => {
     return c.json({ error: "repo is required" }, 400);
   }
 
-  const id = randomUUID();
-  const prBranch = `daybreak/${id}`;
-  const task: Task = { id, repo, branch, prBranch, status: "running", startedAt: Date.now() };
-  tasks.set(id, task);
+  const task = taskFrom({ repo, branch });
+  tasks.set(task.id, task);
+  await persistTask(task);
 
   const config = loadConfig();
   const env: NodeJS.ProcessEnv = {
     ...process.env,
-    TASK_ID: id,
-    PR_BRANCH_NAME: prBranch,
+    TASK_ID: task.id,
+    PR_BRANCH_NAME: task.prBranch,
     UPSTASH_REDIS_REST_URL: config.upstashRedisRestUrl || process.env.UPSTASH_REDIS_REST_URL || "",
     UPSTASH_REDIS_TOKEN: config.upstashRedisToken || process.env.UPSTASH_REDIS_TOKEN || "",
   };
 
   const child = spawn(
     "pnpm",
-    ["--filter", "agent-runner", "sandbox", `--repo=${repo}`, `--branch=${branch}`, `--task-id=${id}`],
+    ["--filter", "agent-runner", "sandbox", `--repo=${repo}`, `--branch=${branch}`, `--task-id=${task.id}`],
     { cwd: repoRoot, env, stdio: "ignore", detached: true },
   );
 
@@ -126,32 +149,35 @@ app.post("/api/tasks", async (c) => {
     task.endedAt = Date.now();
     task.exitCode = code ?? undefined;
     task.status = code === 0 ? "complete" : "failed";
+    tasks.set(task.id, task);
+    await updateTask(task.id, task);
 
     if (task.status === "complete" && config.githubToken) {
       const prUrl = await createPullRequest(task.repo, task.prBranch, task.branch, config.githubToken);
       if (prUrl) {
         task.prUrl = prUrl;
+        tasks.set(task.id, task);
+        await updateTask(task.id, { prUrl });
         await publishEvent(task.id, "pr_created", { prUrl, prBranch: task.prBranch, baseBranch: task.branch });
       }
     }
-
-    tasks.set(id, task);
   });
 
-  return c.json({ taskId: id, repo, branch, status: task.status });
+  return c.json({ taskId: task.id, repo, branch, status: task.status });
 });
 
-app.get("/api/tasks/:id", (c) => {
-  const task = tasks.get(c.req.param("id"));
+app.get("/api/tasks/:id", async (c) => {
+  const id = c.req.param("id");
+  const db = await getTask(id);
+  const task = db ?? tasks.get(id);
   if (!task) return c.json({ error: "task not found" }, 404);
   return c.json(task);
 });
 
 app.get("/api/tasks/:id/events", async (c) => {
   const id = c.req.param("id");
-  const redis = getRedis();
-  const raw = await redis.lrange(`daybreak:stream:${id}`, 0, -1);
-  const events = raw.map((item) => (typeof item === "string" ? JSON.parse(item) : item));
+  await syncEventsFromRedis(id);
+  const events = await getEvents(id);
   return c.json(events);
 });
 
@@ -174,7 +200,8 @@ app.get("/api/tasks/:id/stream", (c) => {
       const raw = await redis.lrange(`daybreak:stream:${id}`, cursor, -1);
       if (raw.length > 0) {
         for (const item of raw) {
-          const event = typeof item === "string" ? JSON.parse(item) : item;
+          const event = typeof item === "string" ? (JSON.parse(item) as StreamEvent) : (item as StreamEvent);
+          await persistEvent(id, event);
           await stream.writeSSE({ data: JSON.stringify(event) });
           cursor++;
         }

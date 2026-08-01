@@ -2,7 +2,7 @@
 
 An open-source, cloud-native developer agent platform that autonomously plans, writes, executes, tests, and ships production software. Ingests natural-language prompts, GitHub Issues, or PR review comments; provisions an isolated Linux execution sandbox; and iterates toward a solution until tests pass and a pull request is submitted. Built with enterprise transparency, deep observability, and **time-travel state rewinding** at its core — every model prompt, token count, tool latency, and reasoning step is traceable, and a human can pause, rewind the agent's execution tree to any step, edit the context, and spawn a parallel attempt branch without starting over.
 
-**Status**: Phase 0 complete; Phase 1 local MVP streaming slice implemented and verified end-to-end.
+**Status**: Phase 0 complete; Phase 1 local MVP implemented with E2B sandboxing, Upstash streaming, PR delivery, and Supabase persistence.
 **Started**: 2026-08-01
 
 ---
@@ -26,7 +26,7 @@ A user (or a GitHub Issue, or a PR review comment) gives Daybreak a task. The pl
 3. **Prepares the workspace** — inside the sandbox, the Pi SDK agent clones the target repo, configures bot committer details, and checks out the target branch.
 4. **Iterates** — analyzes the codebase with `read` and `bash`, parses errors, applies fixes with `edit`/`write`, and re-runs tests. Events stream live to the React dashboard over Upstash Redis via a Hono SSE endpoint.
 5. **Delivers** — creates a feature branch (e.g., `daybreak/<task-id>`), commits and pushes the fix there, then the control plane opens a Pull Request via the GitHub API. `main`/`master` are protected by default.
-6. **Monitors** — the UI receives the `task_complete` or `task_failed` event and shows the final status. Webhook listeners for CI/review are deferred.
+6. **Monitors** — the UI receives the `task_complete` or `task_failed` event and shows the final status. Every task and event is persisted to Supabase Postgres so the dashboard survives control-plane restarts. Webhook listeners for CI/review are deferred.
 
 The differentiators that make this more than "another coding agent":
 
@@ -50,7 +50,7 @@ The differentiators that make this more than "another coding agent":
 ## Build Plan (MVP vertical slice first, then layer the differentiators)
 
 1. **Phase 0** — Repo + `PROJECT_PLAN.md` + `PROGRESS.md`. Pi SDK spike: prove `Agent` + `read`/`write`/`edit`/`bash` tools run against an OpenAI-compatible LLM provider.
-2. **Phase 1 (MVP)** — Dashboard trigger → local Hono control plane → E2B sandbox → Pi agent clones a repo, runs tests, edits, pushes the fix to the target branch, streams events to a minimal React + Vite UI via Upstash Redis + Hono SSE. *Demoable on its own.*
+2. **Phase 1 (MVP)** — Dashboard trigger → local Hono control plane → E2B sandbox → Pi agent clones a repo, runs tests, edits, pushes the fix to a `daybreak/<task-id>` feature branch, the control plane opens a GitHub PR, and every event is persisted to Supabase Postgres. Streams events to a minimal React + Vite UI via Upstash Redis + Hono SSE. *Demoable on its own.*
 3. **Phase 2** — OTel instrumentation → Langfuse; DAG trace visualizer in the dashboard.
 4. **Phase 3** — GitHub App: issue/PR-comment triggers, scoped tokens, review-loop listener.
 5. **Phase 4** — Time-travel: per-turn E2B snapshots + Pi state serialization → rewind + branch UI. *(The headline feature, deliberately late — it's the hardest part.)*

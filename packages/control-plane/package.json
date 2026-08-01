@@ -21,6 +21,7 @@
   "dependencies": {
     "@daybreak/shared": "workspace:*",
     "@hono/node-server": "^2.0.12",
+    "@supabase/supabase-js": "^2.111.0",
     "@upstash/redis": "^1.38.0",
     "hono": "^4.12.32"
   },
