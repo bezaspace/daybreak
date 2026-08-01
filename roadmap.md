@@ -1,16 +1,16 @@
 # Roadmap — Daybreak
 
-**Open-source, cloud-native, autonomous AI software engineer platform with time-travel state branching and full OTel lineage.**
+**Open-source, cloud-native, autonomous AI software engineer platform with time-travel state branching and full OpenTelemetry lineage.**
 
-> **Status:** Planning — spec complete, build pending.
-> **Started:** 2026-08-01 (planning)
-> **Document version:** 1.3 (Checkbox format for progress tracking)
+> **Status:** Planning — spec complete, build pending.  
+> **Started:** 2026-08-01 (planning)  
+> **Document version:** 2.0
 
 ---
 
 ## 0. Vision & North Star
 
-Daybreak is an open-source replica of the cloud coding-agent class of system (Devin, Cursor's cloud agent), built to **understand and demonstrate the engineering behind autonomous coding agents** rather than to ship a commercial product. It takes the same core primitives — a sandboxed Linux execution environment with shell/editor/browser tools, a planner-executor reasoning loop, and GitHub-native PR delivery — and adds two things the closed-source originals do not expose: **full OpenTelemetry lineage** (every prompt, token, tool call, and latency is traceable) and **time-travel state branching** (rewind the cloud sandbox filesystem and agent state to any step, edit the context, and spawn a parallel attempt in a separate sandbox). The entire platform is engineered to run on **$0 of free-tier infrastructure**.
+Daybreak is an open-source replica of the cloud coding-agent class of system (Devin, Cursor's cloud agent), built to **understand and demonstrate the engineering behind autonomous coding agents** rather than to ship a commercial product. It takes the same core primitives — a sandboxed Linux execution environment with shell, editor, and browser tools; a planner-executor reasoning loop; and GitHub-native PR delivery — and adds two things the closed-source originals do not expose: **full OpenTelemetry lineage** (every prompt, token, tool call, and latency is traceable) and **time-travel state branching** (rewind the cloud sandbox filesystem and agent state to any step, edit the context, and spawn a parallel attempt in a separate sandbox). The entire platform is engineered to run on **$0 of free-tier infrastructure**.
 
 The differentiator is the *combination* and the *transparency thesis*, not the concept itself. What is novel here is the specific stack: **time-travel branching + full OTel lineage + $0 free-tier + open-source + GitHub-native CI self-healing**.
 
@@ -18,83 +18,108 @@ The differentiator is the *combination* and the *transparency thesis*, not the c
 
 ## 1. Guiding Principles
 
-- [ ] 1.1. **Local-First Development, Cloud-Ready Architecture.** All code will be written, tested, and demoed locally using local Node.js/Vite dev servers and local tunneling (e.g., `ngrok` or `cloudflared`) for webhooks. The architecture will strictly adhere to Cloudflare Workers/Pages constraints so that the final deployment is a frictionless configuration step rather than a rewrite.
-- [ ] 1.2. **Vertical slice first, differentiators later.** The MVP (Phase 1) proves the end-to-end loop is demoable on its own before any headline feature is touched. Time-travel is deliberately Phase 4.
-- [ ] 1.3. **Every milestone is demoable on its own.** No phase exists only to enable a later phase; each ships a visible capability.
-- [ ] 1.4. **Track cost, latency, and token usage from day one.** The $0 thesis is a continuously-verified invariant, not an afterthought.
-- [ ] 1.5. **Provider-agnostic intelligence.** The agent kernel talks to any OpenAI-compatible endpoint.
-- [ ] 1.6. **Transparency by construction.** Observability is not bolted on — it is a Phase 2 layer that every subsequent phase emits into.
-- [ ] 1.7. **Fail safe, not fail fast.** Resource circuit breakers, sensitive-file denylists, and branch-protection locks are first-class.
-- [ ] 1.8. **AI-Agent Friendly Codebase.** Highly modular, strongly typed, and extensively documented to provide maximum context to the AI agents doing the building.
+- [ ] 1.1. **Safety before features.** Guardrails, branch protection, sensitive-file denylisting, and resource/cost circuit breakers are built in Phase 0 and are non-negotiable for any loop that can `write`, `bash`, `git push`, or open PRs.
+- [ ] 1.2. **Local-first development, cloud-ready architecture.** All code is written, tested, and demoed locally first. Control-plane code is constrained to Cloudflare Workers/Pages-compatible APIs from the start so cloud deployment is a configuration step, not a rewrite.
+- [ ] 1.3. **Vertical slice first, differentiators later.** The MVP (Phase 1) proves the end-to-end loop is demoable on its own before observability, GitHub triggers, time-travel, or CI self-healing.
+- [ ] 1.4. **Every milestone is demoable on its own.** No phase exists only to enable a later phase; each ships a visible capability.
+- [ ] 1.5. **Track cost, latency, token usage, and success rate from day one.** The $0 thesis is a continuously-verified invariant, not an afterthought.
+- [ ] 1.6. **Provider-agnostic intelligence with fallback.** The agent kernel talks to any OpenAI-compatible endpoint and degrades gracefully to a fallback provider if the primary is rate-limited or down.
+- [ ] 1.7. **Transparency by construction.** Observability is not bolted on — it is a first-class layer that every subsequent phase emits into.
+- [ ] 1.8. **Evaluations are a feature, not an afterthought.** A repeatable eval/benchmark harness is created in Phase 0 and runs in CI for every subsequent phase.
+- [ ] 1.9. **Fail safe, not fail fast.** Resource circuit breakers, sensitive-file denylists, human approval gates for destructive actions, and branch-protection locks are first-class.
+- [ ] 1.10. **AI-Agent Friendly Codebase.** Highly modular, strongly typed, and extensively documented to provide maximum context to the AI agents doing the building.
 
 ---
 
 ## 2. Phase Overview
 
-Because this project is being built autonomously by AI coding agents, strict time estimations are counterproductive. Progress is measured by the completion of demoable vertical slices.
+Progress is measured by the completion of demoable vertical slices and objective eval metrics, not calendar estimates.
 
-- [ ] 2.1. **Phase 0 — Foundation & Spike:** Pi SDK proves `read/write/edit/bash` against an OpenAI-compatible LLM; repo setup.
-- [ ] 2.2. **Phase 1 — Local MVP Vertical Slice:** Local React+Vite dashboard → Local Node control plane → Daytona sandbox → Pi agent clones, tests, edits, pushes, opens PR; live-streamed to UI.
-- [ ] 2.3. **Phase 2 — Observability Layer:** Full OTel spans → Langfuse; DAG trace visualizer in dashboard.
-- [ ] 2.4. **Phase 3 — GitHub-Native Triggers:** GitHub App: issue/PR-comment triggers, scoped 1h tokens, review-loop listener via local tunnel.
-- [ ] 2.5. **Phase 4 — Time-Travel Branching:** Per-turn checkpoints (Pi state + Daytona snapshot) → rewind + fork into parallel attempt branch.
-- [ ] 2.6. **Phase 5 — CI Self-Healing:** Webhook on failed `check_run` → wake sandbox → fix commit → push.
-- [ ] 2.7. **Phase 6 — Guardrails & Compaction:** Context compaction, circuit breakers, denylist, branch-protection locks.
-- [ ] 2.8. **Phase 7 — Cloudflare Deployment:** Adapt local codebase to Cloudflare Workers/Pages, configure free-tier infra, v1.0 release.
-
----
-
-## 3. Phase 0 — Foundation & Spike
-
-**Goal:** Stand up the repo and prove the agent kernel runs end-to-end against a free OpenAI-compatible provider before any cloud plumbing or UI is built.
-
-- [ ] 3.1. Initialize `daybreak` monorepo (pnpm workspaces): `packages/control-plane`, `packages/agent-runner`, `packages/ui`, `packages/shared`.
-- [ ] 3.2. Create `ROADMAP.md` (this document).
-- [ ] 3.3. Pi SDK spike: a standalone TypeScript script that instantiates `@earendil-works/pi-agent-core`, wires `read/write/edit/bash` tools, and drives a multi-turn loop against a configured OpenAI-compatible endpoint (Groq / OpenRouter / local Ollama).
-- [ ] 3.4. Create `.env.example` documenting `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`.
-- [ ] 3.5. Set up CI: lint + typecheck + test on push.
-- [ ] 3.6. Confirm Pi SDK package scope (`@earendil-works/pi-agent-core`, v0.74.0+) installs cleanly and the agent loop + tool registration API matches the documented core.
-- [ ] 3.7. Spike each tool in isolation: `read` a file, `edit` it, `bash` `npm test`, observe the loop's compaction behavior on a long session.
-- [ ] 3.8. Record baseline metrics: tokens/turn, p50 latency/turn, cost/task on a toy repo.
-- [ ] 3.9. Document the chosen free LLM provider and its quota shape; note fallback providers.
-- [ ] 3.10. **Exit criteria:** `pnpm spike` clones a toy repo, runs its tests, applies a one-line fix, re-runs tests until green, and prints a token/latency summary table. No cloud, no UI — just the loop.
+| Phase | Name | Ships |
+|-------|------|-------|
+| [ ] 0 | Foundation, Safety Baseline & Feasibility Spikes | Agent loop + guardrails + eval harness + cost/quotabudget model + time-travel feasibility proof |
+| [ ] 1 | Safe Local MVP Vertical Slice | End-to-end dashboard → sandbox → PR with safety, streaming, browser tool, and approval gates |
+| [ ] 2 | Observability, Cost Control & Provider Resilience | OTel/Langfuse trace tree, cost dashboard, provider fallback |
+| [ ] 3 | GitHub-Native Triggers & Review Loop | GitHub App, issue/PR-comment triggers, scoped 1h tokens, review-loop listener |
+| [ ] 4 | Time-Travel State Branching | Per-turn checkpoints, filesystem + Pi-state rewind, parallel attempt forking |
+| [ ] 5 | CI Self-Healing | `check_run` webhook → wake sandbox → fix commit |
+| [ ] 6 | Resilience, Scale & Polish | Task queue, multi-tenancy, idempotency, retry, security audit, branch cleanup |
+| [ ] 7 | Cloudflare Deployment & v1.0 | Workers/Pages, Durable Objects/Queues, production webhooks, release docs |
 
 ---
 
-## 4. Phase 1 — Local MVP Vertical Slice
+## 3. Phase 0 — Foundation, Safety Baseline & Feasibility Spikes
 
-**Goal:** The full Daybreak loop, demoable end-to-end locally: a local dashboard triggers a local control plane server, which provisions a Daytona sandbox, runs the Pi agent to clone/test/edit/push/open a PR, and streams terminal output live to the UI.
+**Goal:** Stand up the repo, prove the agent kernel runs end-to-end against a free OpenAI-compatible provider, establish safety guardrails, an eval harness, and a cost/quotabudget model **before** any cloud plumbing or UI is built. Also prove the two riskiest headline primitives (Pi session serialization and Daytona snapshot rewind) before committing to them.
 
-- [ ] 4.1. **Control plane:** Local Node.js/TypeScript server, structured for Cloudflare Worker migration. `/api/tasks` POST handler that authenticates, creates a Supabase session row, invokes Daytona, and streams events to Upstash Redis.
-- [ ] 4.2. **Agent runner:** Runs inside the Daytona sandbox. Wraps Pi SDK, clones the target repo, configures bot committer, checks out a feature branch, iterates (`read`/`bash`/`edit`), pushes, opens a PR via GitHub API (PAT for MVP).
-- [ ] 4.3. **Sandbox provisioning:** Daytona TypeScript SDK `daytona.create()` from a default snapshot; workspace prep script (git, node, repo clone).
-- [ ] 4.4. **Real-time stream:** Sandbox publishes stdout/stderr/tool-events to an Upstash Redis pub/sub channel; local UI subscribes.
-- [ ] 4.5. **UI:** Local React + Vite dev server. Task trigger form, live terminal panel, PR link, basic task list.
-- [ ] 4.6. **Persistence:** Supabase Postgres. `sessions`, `tasks`, `events` tables; checkpoint metadata stub (filled in Phase 4).
-- [ ] 4.7. Define the event schema (`tool_call`, `tool_result`, `stdout`, `stderr`, `llm_prompt`, `llm_response`, `task_complete`).
-- [ ] 4.8. Build the Daytona workspace image: a snapshot with git, Node, common build tools preinstalled.
-- [ ] 4.9. Implement the control plane → sandbox control channel: control plane issues commands over Daytona's process exec API; sandbox pushes events to Upstash.
-- [ ] 4.10. Wire the UI WebSocket: local server holds the client connection, pulls from Upstash REST, relays to browser.
-- [ ] 4.11. Implement the PR delivery path: branch push + `POST /repos/{owner}/{repo}/pulls`.
-- [ ] 4.12. Record wall-clock time, token count, and $-cost per MVP task as a baseline.
-- [ ] 4.13. **Exit criteria:** From the local dashboard, click "Fix failing test on repo X" → watch live terminal → a PR appears on GitHub. The PR contains a real fix that passes CI.
+- [ ] 3.1. Initialize `daybreak` monorepo with pnpm workspaces: `packages/control-plane`, `packages/agent-runner`, `packages/ui`, `packages/shared`.
+- [ ] 3.2. Create `ROADMAP.md` (this document) and `decisions.md`.
+- [ ] 3.3. Create `.env.example` documenting `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `LLM_FALLBACK_BASE_URL`, `LLM_FALLBACK_API_KEY`, `LLM_FALLBACK_MODEL`, Daytona, Upstash, Supabase, Langfuse, and GitHub credentials.
+- [ ] 3.4. Pi SDK spike: standalone TypeScript script using `@earendil-works/pi-agent-core` that wires `read`/`write`/`edit`/`bash` and drives a multi-turn loop against an OpenAI-compatible provider.
+- [ ] 3.5. **Safety baseline (Phase 0, not Phase 6):**
+  - [ ] 3.5.1. Tool middleware denylist: block `read`/`write`/`edit` on `.env`, `*.pem`, `.ssh/*`, `.git/config`, `id_*`, `*secret*`, `*token*` unless explicitly approved.
+  - [ ] 3.5.2. Branch-protection lock: agent refuses to commit, push, or reset `main`/`master` or any protected branch; every task must use a feature branch.
+  - [ ] 3.5.3. Resource circuit breakers: default `MAX_TURNS=40`, `MAX_WALL_CLOCK_MINUTES=20`, `MAX_COST_USD=0.50` per task. Exceeding any limit stops the task gracefully with a final trace.
+  - [ ] 3.5.4. Human approval gate: pause before destructive actions (`git push`, `git push --force`, branch deletion, `rm -rf`, opening a PR, force-merging) and require UI/webhook approval.
+- [ ] 3.6. **Eval harness:** Define a `packages/evals` package with a small benchmark set (a toy repo, a real-ish one-line bug, a failing test). Each phase must be able to run `pnpm eval` and report pass/fail, token count, cost, and wall-clock time.
+- [ ] 3.7. **Cost and quota-budget model:** Produce a living budget document (`docs/COST_BUDGET.md`) that models:
+  - LLM tokens per turn and per task against chosen free-tier provider(s).
+  - Upstash Redis free-tier 10,000 commands/day and Supabase 500MB/500k row limits.
+  - Daytona snapshot frequency, latency, and credit consumption for time-travel.
+  - Langfuse free trace tier (50,000 traces/month).
+- [ ] 3.8. **Secrets management strategy:** No secrets in code. Local: `.env` + 1Password/direnv or similar. Cloud: Cloudflare Worker secrets + Supabase Vault. GitHub App private key stored as a Cloudflare secret/Worker secret. Document rotation policy.
+- [ ] 3.9. **Time-travel feasibility spike (critical):**
+  - [ ] 3.9.1. Prove Pi session state can be serialized to a deterministic blob, reloaded into a fresh process, and optionally branched/forked. If `pi-agent-core` does not expose this, identify the minimal wrapper or patch needed.
+  - [ ] 3.9.2. Measure `daytona.snapshot()` latency and cost on a small workspace; determine if per-turn snapshots are viable or if a per-turn `git commit` + dependency-cache strategy is required.
+  - [ ] 3.9.3. Document the chosen checkpoint strategy in `docs/TIME_TRAVEL.md` before Phase 4 begins. If feasibility fails, downgrade time-travel to git-based checkpoints.
+- [ ] 3.10. Set up CI: `pnpm install`, lint, typecheck, unit tests, and the eval harness on every push.
+- [ ] 3.11. Confirm `pi-agent-core` (v0.83.0+) installs cleanly and its tool-registration and context-compaction APIs are understood.
+- [ ] 3.12. Spike each tool in isolation (`read`, `edit`, `bash npm test`) and record baseline `tokens/turn`, `p50 latency/turn`, and `cost/task` on the toy repo.
+- [ ] 3.13. Document the chosen free LLM provider, its quota shape, and fallback providers.
+- [ ] 3.14. **Exit criteria:**
+  - `pnpm spike` clones a toy repo, runs its tests, applies a one-line fix, re-runs tests until green, and prints a token/latency/cost summary table.
+  - Attempting to read `.env` is blocked by the denylist.
+  - `MAX_TURNS` is enforced.
+  - A feasibility report for time-travel serialization and Daytona snapshots is written and reviewed.
 
 ---
 
-## 5. Phase 2 — Observability & Trace Visualization
+## 4. Phase 1 — Safe Local MVP Vertical Slice
 
-**Goal:** Every prompt, token count, tool call, and latency is emitted as OpenTelemetry spans to Langfuse, and a DAG visualizer in the dashboard renders the agent's reasoning tree with cost-per-step.
+**Goal:** The full Daybreak loop, demoable end-to-end locally, with safety, evals, and cost tracking already in place.
 
-- [ ] 5.1. **OTel instrumentation:** In the agent runner. A span per LLM call (model, prompt-token-count, completion-token-count, latency), a child span per tool call (tool name, args, result size, latency), all under a root `task` span.
+- [ ] 4.1. **Control plane:** Local Node.js/TypeScript server (`packages/control-plane`), structured for Cloudflare Worker migration. `/api/tasks` POST handler that authenticates, creates a Supabase session row, invokes Daytona, and streams events to Upstash Redis.
+- [ ] 4.2. **Agent runner:** Runs inside the Daytona sandbox. Wraps Pi SDK, clones the target repo, configures bot committer, checks out a feature branch, iterates (`read`/`bash`/`edit`), pushes, opens a PR via GitHub API (PAT for MVP; installation tokens later).
+- [ ] 4.3. **Sandbox provisioning:** Daytona TypeScript SDK `daytona.create()` from a default snapshot; workspace prep script installs git, node, pnpm, Python, and common build tools.
+- [ ] 4.4. **Real-time stream:** Sandbox publishes `stdout`/`stderr`/tool-events to an Upstash Redis pub/sub channel; local UI subscribes. Monitor Upstash command consumption against the quota model.
+- [ ] 4.5. **UI:** Local React + Vite dev server. Task trigger form, live terminal panel, PR link, basic task list, and approval-gate buttons for destructive actions.
+- [ ] 4.6. **Persistence:** Supabase Postgres. `sessions`, `tasks`, `events`, `checkpoints` (stub) tables.
+- [ ] 4.7. **Event schema:** `tool_call`, `tool_result`, `stdout`, `stderr`, `llm_prompt`, `llm_response`, `approval_request`, `approval_response`, `task_complete`, `task_failed`.
+- [ ] 4.8. **Context compaction:** Integrate Pi's compaction settings and the hard `MAX_TURNS` cap from Phase 0.
+- [ ] 4.9. **Browser/Playwright tool:** Integrate headless Chromium inside the sandbox so the agent can visually verify running web apps and interact with DOM elements; stream screenshots to the UI.
+- [ ] 4.10. **PR delivery path:** branch push + `POST /repos/{owner}/{repo}/pulls`.
+- [ ] 4.11. **Control channel:** Control plane issues commands over Daytona's process exec API; sandbox pushes events to Upstash.
+- [ ] 4.12. **UI WebSocket:** Local server holds the client connection, pulls from Upstash REST, relays to browser.
+- [ ] 4.13. Run the Phase 0 eval harness against this local MVP and record wall-clock time, token count, and $-cost per task.
+- [ ] 4.14. **Exit criteria:** From the local dashboard, click "Fix failing test on repo X" → watch live terminal and browser stream → a PR appears on GitHub. The PR contains a real fix that passes CI, no `.env` was read, the branch is not `main`, and `MAX_TURNS`/`MAX_COST` are enforced.
+
+---
+
+## 5. Phase 2 — Observability, Cost Control & Provider Resilience
+
+**Goal:** Every prompt, token count, tool call, and latency is emitted as OpenTelemetry spans to Langfuse, the dashboard renders the reasoning tree, and the system survives primary LLM provider outages.
+
+- [ ] 5.1. **OTel instrumentation:** In the agent runner. A root `task` span with child spans per LLM call (model, prompt/completion token counts, latency) and per tool call (tool name, args, result size, latency).
 - [ ] 5.2. **Langfuse ingestion:** Spans exported via the OTel HTTP exporter to the Langfuse OTel endpoint.
-- [ ] 5.3. **DAG trace visualizer:** In the UI. Queries the Langfuse API for a task's trace, renders the reasoning tree with per-node cost and latency. Color-code tool types; surface token totals.
+- [ ] 5.3. **DAG trace visualizer:** In the UI. Query Langfuse API for a task's trace; render reasoning tree with per-node cost and latency; color-code tool types; surface token totals.
 - [ ] 5.4. **Cost dashboard:** Aggregate $-spend per task, per provider, per day, sourced from span token counts × provider pricing.
 - [ ] 5.5. Map the Phase 1 event schema 1:1 to OTel span attributes.
-- [ ] 5.6. Wrap the Pi SDK's LLM-call and tool-execution hooks with span start/end.
-- [ ] 5.7. Build the Langfuse query client (API key, project-scoped) for the visualizer.
-- [ ] 5.8. Render the DAG with a library like React Flow or D3; make nodes clickable to show the full prompt/response.
-- [ ] 5.9. Validate the $0 invariant: confirm Hobby-tier observation budget covers expected task volume.
-- [ ] 5.10. **Exit criteria:** Run a task → open the local dashboard trace view → see the full reasoning tree with per-step token cost and latency. Total task cost displayed.
+- [ ] 5.6. Wrap Pi SDK's LLM-call and tool-execution hooks with span start/end.
+- [ ] 5.7. **Provider fallback:** When the primary `LLM_BASE_URL` returns 429/5xx or a configurable retry budget is exhausted, switch to `LLM_FALLBACK_*`. Record provider usage in traces.
+- [ ] 5.8. Build the Langfuse query client for the visualizer.
+- [ ] 5.9. Render the DAG with React Flow or D3; make nodes clickable to show full prompt/response.
+- [ ] 5.10. Validate the $0 invariant: confirm free-tier observation budgets cover the expected eval task volume.
+- [ ] 5.11. **Exit criteria:** Run a task → open the local dashboard trace view → see the full reasoning tree with per-step token cost and latency. Total task cost is displayed. Pulling the primary LLM endpoint offline causes an automatic fallback with a visible trace event.
 
 ---
 
@@ -102,32 +127,32 @@ Because this project is being built autonomously by AI coding agents, strict tim
 
 **Goal:** Daybreak is triggerable from a GitHub Issue or a PR review comment, uses scoped 1-hour installation tokens, and listens for reviewer comments to iterate.
 
-- [ ] 6.1. **GitHub App:** Registered with permissions: `contents: write`, `pull_requests: write`, `issues: read`, `checks: read`, `metadata: read`. Subscribes to `issue_comment`, `pull_request_review_comment`, `pull_request_review`, `check_run`.
+- [ ] 6.1. **GitHub App:** Register with least-privilege permissions: `contents: write`, `pull_requests: write`, `issues: read`, `checks: read`, `metadata: read`. Subscribes to `issue_comment`, `pull_request_review_comment`, `pull_request_review`, `check_run`.
 - [ ] 6.2. **Local Webhook Tunneling:** Use `cloudflared` or `ngrok` to expose the local control plane to GitHub webhooks during development.
 - [ ] 6.3. **Webhook handler:** In the control plane. Verifies signature, fetches a scoped 1-hour installation token via the App's JWT, creates a task, provisions the sandbox with the token injected.
 - [ ] 6.4. **Issue/PR-comment parsing:** Extracts the instruction, target repo/branch, and context; maps to a task spec.
 - [ ] 6.5. **Review-loop listener:** On new `pull_request_review_comment` with `@daybreak-bot`, wakes the sandbox, applies the review feedback, pushes to the existing PR branch.
-- [ ] 6.6. **Session registry:** In Supabase. Maps GitHub installation → sandbox ID → active task.
-- [ ] 6.7. Generate the GitHub App private key; store as a local secret; implement JWT signing + installation-token exchange.
+- [ ] 6.6. **Multi-tenancy stub:** In Supabase, map GitHub installation → workspace/org/user, and enforce per-installation task-rate limits.
+- [ ] 6.7. Generate the GitHub App private key; store as a Cloudflare/Worker secret; implement JWT signing + installation-token exchange.
 - [ ] 6.8. Replace the MVP PAT path with installation tokens everywhere.
 - [ ] 6.9. Implement comment-trigger routing: distinguish "new task" (issue) vs. "iterate on existing PR" (review comment).
-- [ ] 6.10. Add sandbox standby/keep-alive: a PR-opened task keeps its sandbox alive (idle) for a configurable window to absorb review feedback.
-- [ ] 6.11. **Exit criteria:** Comment `@daybreak-bot fix the flaky test` on an issue → Daybreak opens a PR. A reviewer comments `@daybreak-bot also handle the null case` → Daybreak pushes a follow-up commit to the same PR.
+- [ ] 6.10. Add sandbox standby/keep-alive: a PR-opened task keeps its sandbox alive (idle) for a configurable window to absorb review feedback, subject to cost/turn caps.
+- [ ] 6.11. **Exit criteria:** Comment `@daybreak-bot fix the flaky test` on an issue → Daybreak opens a PR. A reviewer comments `@daybreak-bot also handle the null case` → Daybreak pushes a follow-up commit to the same PR. All token/cost guardrails remain active.
 
 ---
 
 ## 7. Phase 4 — Time-Travel State Branching *(Headline Feature)*
 
-**Goal:** Rewind the agent's execution tree to any step, edit the context or prompt, and spawn a parallel attempt branch in a separate sandbox.
+**Goal:** Rewind the agent's execution tree to any step, edit the context or prompt, and spawn a parallel attempt branch in a separate sandbox. This phase depends on the feasibility report from Phase 0.
 
-- [ ] 7.1. **Checkpoint model:** A checkpoint is a tuple `{ turn, timestamp, piStateRef, daytonaSnapshotId, parentCheckpointId }` stored in Supabase. One checkpoint per turn.
-- [ ] 7.2. **Filesystem rewind:** Via Daytona snapshots. After each turn, capture a Daytona snapshot of the sandbox filesystem + dependency state.
-- [ ] 7.3. **Agent-state rewind:** Via Pi session serialization. Leverage Pi's native `/tree` branching and `/fork` by serializing the Pi session at each checkpoint.
-- [ ] 7.4. **Parallel attempt branching:** Via Daytona copy-on-write forks. When a user branches from checkpoint N, fork the sandbox and fork the Pi session.
-- [ ] 7.5. **Branch UI:** In the dashboard. A tree visualization of checkpoints. User clicks a node, edits the context/instruction, clicks "Branch". A new sandbox is spun up from the snapshot, Pi state is restored and forked, and the new branch begins executing live.
-- [ ] 7.6. Implement the checkpoint manager in the agent runner: after each tool turn, `daytona.snapshot()` + `pi.serialize()`.
-- [ ] 7.7. Implement the fork endpoint in the control plane: given `checkpointId`, `daytona.fork(snapshotId)` + `pi.fork(stateRef)`.
-- [ ] 7.8. Build the UI tree component. Allow context window editing before spawning a branch.
+- [ ] 7.1. **Checkpoint model:** A checkpoint is `{ turn, timestamp, piStateRef, fsSnapshotId, parentCheckpointId }` stored in Supabase. One checkpoint per turn.
+- [ ] 7.2. **Filesystem rewind:** Use the strategy proven in Phase 0 — either Daytona snapshots per turn or a per-turn `git commit` + dependency-cache fallback.
+- [ ] 7.3. **Agent-state rewind:** Serialize Pi session at each checkpoint and reload/fork from `piStateRef`.
+- [ ] 7.4. **Parallel attempt branching:** Fork the sandbox and fork the Pi session from checkpoint `N`.
+- [ ] 7.5. **Branch UI:** In the dashboard. A tree visualization of checkpoints. User clicks a node, edits context/instruction, clicks "Branch". A new sandbox is spun from the snapshot, Pi state is restored and forked, and the new branch begins executing live.
+- [ ] 7.6. Implement the checkpoint manager in the agent runner: after each tool turn, snapshot filesystem and serialize Pi state.
+- [ ] 7.7. Implement the fork endpoint in the control plane: given `checkpointId`, provision a sandbox from `fsSnapshotId` and restore `piStateRef`.
+- [ ] 7.8. Build the UI tree component. Allow context-window editing before spawning a branch.
 - [ ] 7.9. Handle branch convergence: allow the user to promote a branch to become the primary PR, abandoning or pausing others.
 - [ ] 7.10. **Exit criteria:** Run a task to completion. Rewind to step 3. Edit the prompt. Click "Branch". Watch a second, parallel sandbox execute a different path. Promote the second branch to a new PR.
 
@@ -140,42 +165,75 @@ Because this project is being built autonomously by AI coding agents, strict tim
 - [ ] 8.1. **Webhook listener:** For `check_run` events with `conclusion: failure`.
 - [ ] 8.2. **Log fetcher:** Uses GitHub API to pull the failed CI step logs.
 - [ ] 8.3. **Heal task router:** Creates a new task in an existing (or forked) sandbox, injecting the CI failure logs as context for the Pi agent.
-- [ ] 8.4. **Commit path:** Agent applies fix, amends or pushes new commit to the existing PR branch. CI re-runs automatically.
+- [ ] 8.4. **Commit path:** Agent applies fix and pushes a new commit to the existing PR branch. CI re-runs automatically.
 - [ ] 8.5. Filter `check_run` webhooks to only those on Daybreak PRs.
 - [ ] 8.6. Implement log parsing to extract the relevant error block (avoid sending 10MB of raw logs to the LLM).
 - [ ] 8.7. Feed the error to Pi with a targeted prompt: "CI failed with: [error]. Fix it."
-- [ ] 8.8. Add circuit breaker: max 2 self-heal attempts per PR to prevent infinite CI loops.
-- [ ] 8.9. **Exit criteria:** Merge a PR with a deliberately broken test. CI fails. Watch Daybreak receive the webhook, analyze the log, push a fix, and watch CI go green.
+- [ ] 8.8. Add circuit breaker: max 2 self-heal attempts per PR to prevent infinite CI loops; still subject to `MAX_TURNS` and `MAX_COST`.
+- [ ] 8.9. **Exit criteria:** Merge a PR with a deliberately broken test. CI fails. Daybreak receives the webhook, analyzes the log, pushes a fix, and CI goes green.
 
 ---
 
-## 9. Phase 6 — Guardrails & Compaction
+## 9. Phase 6 — Resilience, Scale & Polish
 
-**Goal:** Make the platform safe and resilient for long-running tasks without blowing context windows or budgets.
+**Goal:** Make the platform safe, resilient, and multi-user without blowing context windows, quotas, or budgets.
 
-- [ ] 9.1. **Context compaction:** Integrate Pi's compaction settings to summarize older conversation history when approaching context limits.
-- [ ] 9.2. **Resource circuit breakers:** Hard limits on wall-clock time (e.g., 20 min) and turn count (e.g., 40 turns) per task. If hit, task fails gracefully with a trace.
-- [ ] 9.3. **Sensitive-file denylist:** Block `read`/`write`/`edit` tools on `.env`, `*.pem`, `.ssh/*`, etc.
-- [ ] 9.4. **Branch-protection locks:** Agent refuses to commit directly to `main` or `master`; always uses feature branches.
-- [ ] 9.5. **Cost circuit breaker:** Abort task if total $-cost for a session exceeds a threshold (e.g., $0.50).
-- [ ] 9.6. Configure Pi's `compaction` settings in the agent runner initialization.
-- [ ] 9.7. Implement middleware in the tool execution layer to intercept and block denylisted file paths.
-- [ ] 9.8. Add a watchdog timer in the control plane that terminates sandboxes exceeding limits.
-- [ ] 9.9. **Exit criteria:** Attempt to make the agent read `.env` → blocked. Run a task in a loop that never passes tests → hits 40-turn cap and stops. Run a huge task → context compacts and continues.
+- [ ] 9.1. **Context compaction:** Tune Pi's compaction settings for long tasks and large repositories.
+- [ ] 9.2. **Resource circuit breakers:** Finalize wall-clock (20 min), turn (40), and cost ($0.50) per task with graceful failure and full trace.
+- [ ] 9.3. **Sensitive-file denylist:** Finalize and expand path patterns; add runtime log redaction so LLM/tool outputs cannot leak secrets.
+- [ ] 9.4. **Branch-protection locks:** Agent refuses to commit directly to `main`/`master`; always uses feature branches.
+- [ ] 9.5. **Cost circuit breaker:** Abort task if total $-cost exceeds threshold; emit alert.
+- [ ] 9.6. **Task queue / worker:** Introduce a durable queue (Cloudflare Queues or Redis Streams) so multiple webhooks and UI triggers are processed without data loss or duplication.
+- [ ] 9.7. **Idempotency and deduplication:** Webhook events and tasks carry idempotency keys; duplicate triggers are collapsed.
+- [ ] 9.8. **Retry and dead-letter handling:** Failed tasks retry with exponential backoff; permanently failed tasks land in a dead-letter row in Supabase for manual inspection.
+- [ ] 9.9. **Multi-tenancy and auth:** Per-GitHub-installation isolation, per-user/per-org task quotas, and role-based actions.
+- [ ] 9.10. **Security audit:** Review sandbox escape vectors, LLM injection risks, path traversal in tool paths, and log sanitization.
+- [ ] 9.11. **Branch cleanup:** Delete or archive stale feature branches and terminate idle sandboxes automatically.
+- [ ] 9.12. **Exit criteria:** Attempt to make the agent read `.env` → blocked. Run a task in a loop that never passes tests → hits the 40-turn cap and stops. Simulate a webhook flood → queue absorbs it without duplicate tasks or quota exhaustion.
 
 ---
 
 ## 10. Phase 7 — Cloudflare Deployment & v1.0 Release
 
-**Goal:** Take the fully functional, locally-tested codebase and deploy it to the $0 free-tier cloud infrastructure (Cloudflare Workers/Pages, Upstash, Supabase, Langfuse).
+**Goal:** Take the fully functional, locally-tested codebase and deploy it to the $0 free-tier cloud infrastructure (Cloudflare Workers/Pages, Upstash, Supabase, Langfuse, Daytona).
 
-- [ ] 10.1. **Control Plane Migration:** Adapt the local Node.js control plane to run natively on Cloudflare Workers. Ensure WebSocket handling is moved to Durable Objects. Replace Node-specific APIs with Web standard APIs.
-- [ ] 10.2. **UI Deployment:** Deploy React + Vite app to Cloudflare Pages. Ensure Edge compatibility for any API routes.
-- [ ] 10.3. **Environment Configuration:** Move all local `.env` secrets to Cloudflare Worker secrets and Upstash/Supabase dashboards.
-- [ ] 10.4. **Production Webhooks:** Point GitHub App webhook URL to the deployed Cloudflare Worker URL.
-- [ ] 10.5. **Documentation:** `DEPLOYMENT.md` guide, architecture diagrams, and v1.0 release notes.
-- [ ] 10.6. Audit codebase for Node.js built-ins not supported in Workerd. Replace with Cloudflare bindings or Web APIs.
+- [ ] 10.1. **Control Plane Migration:** Adapt the local Node.js control plane to run natively on Cloudflare Workers. Move long-lived WebSocket/queue handling to Durable Objects or Cloudflare Queues; replace Node-only APIs with Web standard APIs.
+- [ ] 10.2. **Architecture audit:** Confirm no long-running agent work executes inside a Worker invocation. Agent orchestration is enqueue + signal; Daytona containers do the heavy work.
+- [ ] 10.3. **UI Deployment:** Deploy React + Vite app to Cloudflare Pages. Ensure Edge compatibility for any API routes.
+- [ ] 10.4. **Environment Configuration:** Move all local `.env` secrets to Cloudflare Worker secrets and Upstash/Supabase dashboards.
+- [ ] 10.5. **Production Webhooks:** Point GitHub App webhook URL to the deployed Cloudflare Worker URL.
+- [ ] 10.6. **Documentation:** `DEPLOYMENT.md` guide, architecture diagrams, operator runbook, and v1.0 release notes.
 - [ ] 10.7. Set up Durable Objects for the WebSocket bridge between Upstash Redis and the browser.
-- [ ] 10.8. Configure `wrangler.toml` with all bindings (Supabase URL, Upstash REST URL, GitHub App ID, Langfuse keys).
+- [ ] 10.8. Configure `wrangler.toml` with all bindings (Supabase URL, Upstash REST URL, GitHub App ID, Langfuse keys, Daytona config).
 - [ ] 10.9. Run end-to-end production test: trigger via GitHub Issue → Cloudflare Worker → Daytona → PR.
-- [ ] 10.10. **Exit criteria:** The entire Daybreak platform is accessible via a public URL. A GitHub issue triggers the cloud-hosted agent, which opens a PR, with live logs streaming to the deployed dashboard. Total monthly operating cost = $0.
+- [ ] 10.10. **Exit criteria:** The entire Daybreak platform is accessible via a public URL. A GitHub issue triggers the cloud-hosted agent, which opens a PR, with live logs streaming to the deployed dashboard. Total monthly operating cost = $0 under the modeled free-tier quotas.
+
+---
+
+## 11. Non-Goals for v1.0
+
+- Public multi-tenant SaaS with billing and user sign-up (single-user/single-org GitHub App install only).
+- Running untrusted public repos without an explicit approval gate.
+- Order execution, real-time trading, or any non-research use.
+- Native mobile or desktop apps.
+- On-prem or self-hosted Kubernetes deployment.
+- A custom vector/RAG memory system (use existing tools if needed).
+
+---
+
+## 12. Open Questions & Risks
+
+- Does `pi-agent-core` expose true session serialization and fork primitives, or do we need to build a wrapper?
+- What is the real latency and credit cost of per-turn Daytona snapshots at the task volumes we expect?
+- Which free-tier OpenAI-compatible provider gives the best success-rate/availability for coding tasks, and what are its exact rate limits?
+- Can Cloudflare Workers free tier handle webhook fan-in and Durable Object usage without hitting limits?
+- How do we sanitize tool output so an adversarial repo cannot exfiltrate secrets even if the denylist is bypassed?
+
+---
+
+## 13. Reference
+
+- Pi SDK: https://github.com/earendil-works/pi (`@earendil-works/pi-agent-core`, MIT, by Mario Zechner)
+- Daytona: https://www.daytona.io/
+- OpenTelemetry: https://opentelemetry.io/
+- Langfuse: https://langfuse.com/
