@@ -22,6 +22,10 @@ interface Task {
   costUsd?: number;
   startedAt?: number;
   endedAt?: number;
+  triggerSource?: string;
+  prNumber?: number;
+  sandboxId?: string;
+  keepAliveUntil?: number;
 }
 
 interface Screenshot {
@@ -89,6 +93,27 @@ function formatEvent(event: StreamEvent): string {
     const cost = typeof data.metrics?.estimatedCostUsd === "number" ? ` cost=$${data.metrics.estimatedCostUsd.toFixed(4)}` : "";
     const provider = data.provider ? ` provider=${data.provider}` : "";
     return `[${time}] ${event.type}${provider}${cost}${data.error ? ": " + data.error : ""}`;
+  }
+  if (event.type === "sandbox_created" || event.type === "sandbox_resumed" || event.type === "sandbox_keep_alive") {
+    const data = event.data as { sandboxId?: string; keepAliveUntil?: number; isReview?: boolean };
+    const until = data.keepAliveUntil ? ` until ${new Date(data.keepAliveUntil).toLocaleTimeString()}` : "";
+    return `[${time}] ${event.type}: sandbox=${data.sandboxId || "-"}${until}${data.isReview ? " review" : ""}`;
+  }
+  if (event.type === "review_task_start") {
+    const data = event.data as { sandboxId?: string; prBranch?: string };
+    return `[${time}] review_task_start: prBranch=${data.prBranch || "-"} sandbox=${data.sandboxId || "-"}`;
+  }
+  if (event.type === "review_complete" || event.type === "review_failed") {
+    const data = event.data as { success?: boolean; summary?: string; error?: string };
+    return `[${time}] ${event.type}: ${data.success ? "success" : "failed"}${data.summary ? " " + data.summary.slice(0, 120) : ""}${data.error ? ": " + data.error : ""}`;
+  }
+  if (event.type === "commit_pushed") {
+    const data = event.data as { prBranch?: string };
+    return `[${time}] commit_pushed: ${data.prBranch || "-"}`;
+  }
+  if (event.type === "pr_created") {
+    const data = event.data as { prUrl?: string; prNumber?: number; prBranch?: string };
+    return `[${time}] pr_created: #${data.prNumber ?? "-"} ${data.prBranch || "-"} → ${data.prUrl || "-"}`;
   }
   return `[${time}] ${event.type}: ${JSON.stringify(event.data).slice(0, 200)}`;
 }

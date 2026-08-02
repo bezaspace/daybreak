@@ -20,20 +20,20 @@
 
 **What it ships:** The control plane accepts and verifies GitHub repo webhooks and refuses to run on untrusted repos.
 
-- Add `POST /api/webhooks/github` in `packages/control-plane/src/server.ts`.
-- Verify `X-Hub-Signature-256` using `GITHUB_WEBHOOK_SECRET` with HMAC-SHA256 over the raw request body. Use Hono's `bodyLimit` middleware (e.g. `1 MB`).
-- Validate `repository.full_name` against `GITHUB_WEBHOOK_REPO_ALLOWLIST` (comma-separated `owner/repo` or `owner/*` patterns) to prevent abuse of public/untrusted repos.
-- Route by `X-GitHub-Event`:
+- [x] Add `POST /api/webhooks/github` in `packages/control-plane/src/server.ts`.
+- [x] Verify `X-Hub-Signature-256` using `GITHUB_WEBHOOK_SECRET` with HMAC-SHA256 over the raw request body. Use Hono's `bodyLimit` middleware (e.g. `1 MB`).
+- [x] Validate `repository.full_name` against `GITHUB_WEBHOOK_REPO_ALLOWLIST` (comma-separated `owner/repo` or `owner/*` patterns) to prevent abuse of public/untrusted repos.
+- [x] Route by `X-GitHub-Event`:
   - `issue_comment` (on a plain issue) with an `@daybreak-bot` mention → create a new task.
   - `pull_request_review_comment` with an `@daybreak-bot` mention → create a review-iteration task.
   - `pull_request_review` with an `@daybreak-bot` body mention → create a review-iteration task.
   - `check_run` → return `200` (deferred to Phase 5; subscribing now avoids reconfiguring webhooks later).
   - `ping` → return `200`.
-- Parse payload fields: `repository.clone_url`, `repository.full_name`, `repository.default_branch`, `pull_request.head.ref`, `pull_request.base.ref`, `pull_request.number`, `issue.title`, `issue.body`, `comment.body`, `sender.login`, and `X-GitHub-Delivery`.
-- Add `GITHUB_WEBHOOK_SECRET` and `GITHUB_WEBHOOK_REPO_ALLOWLIST` to `DaybreakConfig` / `.env.example`.
-- Add idempotency: record `X-GitHub-Delivery` in Redis with a 24-hour TTL so retries do not duplicate tasks.
-- Add `triggerSource` (`"dashboard" | "issue_comment" | "review_comment"`), `githubSender`, `prNumber`, and `prompt` to `Task` / `PersistedTask` and `db.ts`.
-- Add the corresponding columns to the Supabase `tasks` table (`supabase/migrations/20260802_add_phase3_task_fields.sql`).
+- [x] Parse payload fields: `repository.clone_url`, `repository.full_name`, `repository.default_branch`, `pull_request.head.ref`, `pull_request.base.ref`, `pull_request.number`, `issue.title`, `issue.body`, `comment.body`, `sender.login`, and `X-GitHub-Delivery`.
+- [x] Add `GITHUB_WEBHOOK_SECRET` and `GITHUB_WEBHOOK_REPO_ALLOWLIST` to `DaybreakConfig` / `.env.example`.
+- [x] Add idempotency: record `X-GitHub-Delivery` in Redis with a 24-hour TTL so retries do not duplicate tasks.
+- [x] Add `triggerSource` (`"dashboard" | "issue_comment" | "review_comment"`), `githubSender`, `prNumber`, and `prompt` to `Task` / `PersistedTask` and `db.ts`.
+- [x] Add the corresponding columns to the Supabase `tasks` table (`supabase/migrations/20260802_add_phase3_task_fields.sql`).
 
 **Acceptance:**
 - `cloudflared tunnel --url http://localhost:8787` exposes the local control plane and a real `issue_comment` webhook is accepted.
@@ -67,23 +67,24 @@
 
 **What it ships:** When a PR review comment asks for changes, Daybreak reconnects to the same sandbox (or a fresh one) and pushes a follow-up commit to the PR branch using the PAT.
 
-- Extend `packages/agent-runner/src/sandbox.ts`:
-  - Add `--connect=<sandboxId>` and `--review` flags.
-  - When `--connect` is supplied, call `Sandbox.connect(sandboxId)` and skip Node/Chromium installation.
-  - When `KEEP_SANDBOX_ALIVE=true`, do not `sandbox.kill()` after the initial run; call `sandbox.setTimeout(keepAliveMs)` (and optionally `sandbox.pause()`) and emit a `sandbox_created` event containing `sandboxId`.
-- Extend `packages/agent-runner/src/run-task.ts` to support `REVIEW_MODE=true`:
-  - Do not `rm -rf` and re-clone the repo.
-  - Run `git checkout ${PR_BRANCH_NAME} && git pull origin ${PR_BRANCH_NAME}`.
-  - Use `TASK_PROMPT` (the review comment) and apply the requested change.
-  - Stage, commit, and push to the same branch.
-  - Do not open a new PR.
-- In the control plane, when a review webhook arrives:
-  - Look up the original task by `prBranch` or by `repo + prNumber`.
-  - If a `sandboxId` exists and the sandbox is still alive, connect to it and run the review bundle with a fresh `GITHUB_TOKEN` env.
-  - If the sandbox is gone, spawn a new sandbox, clone the PR branch, and run the review.
-- Add `REVIEW_KEEP_ALIVE_MS` config (default ~15 minutes; cap under the E2B Hobby max lifetime of 1 hour).
-- Publish events: `review_task_start`, `sandbox_resumed`, `commit_pushed`, `review_complete`.
-- Update the dashboard to render review events.
+- [x] Extend `packages/agent-runner/src/sandbox.ts`:
+  - [x] Add `--connect=<sandboxId>` and `--review` flags.
+  - [x] When `--connect` is supplied, call `Sandbox.connect(sandboxId)` and skip Node/Chromium installation.
+  - [x] When `KEEP_SANDBOX_ALIVE=true`, do not `sandbox.kill()` after the initial run; call `sandbox.setTimeout(keepAliveMs)` (and optionally `sandbox.pause()`) and emit a `sandbox_created` event containing `sandboxId`.
+- [x] Extend `packages/agent-runner/src/run-task.ts` to support `REVIEW_MODE=true`:
+  - [x] Do not `rm -rf` and re-clone the repo.
+  - [x] Run `git checkout ${PR_BRANCH_NAME} && git pull origin ${PR_BRANCH_NAME}`.
+  - [x] Use `TASK_PROMPT` (the review comment) and apply the requested change.
+  - [x] Stage, commit, and push to the same branch.
+  - [x] Do not open a new PR.
+- [x] In the control plane, when a review webhook arrives:
+  - [x] Look up the original task by `prBranch` or by `repo + prNumber`.
+  - [x] If a `sandboxId` exists and the sandbox is still alive, connect to it and run the review bundle with a fresh `GITHUB_TOKEN` env.
+  - [x] If the sandbox is gone, spawn a new sandbox, clone the PR branch, and run the review.
+- [x] Add `REVIEW_KEEP_ALIVE_MS` config (default ~15 minutes; cap under the E2B Hobby max lifetime of 1 hour).
+- [x] Add `sandbox_id` and `keep_alive_until` columns to `tasks` (`supabase/migrations/2026080201_add_sandbox_keepalive_fields.sql`).
+- [x] Publish events: `review_task_start`, `sandbox_resumed`, `commit_pushed`, `review_complete`.
+- [x] Update the dashboard to render review events.
 
 **Acceptance:**
 - An issue-comment task opens a PR.

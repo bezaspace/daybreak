@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { loadConfig } from "@daybreak/shared";
 import { execSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import pc from "picocolors";
 import { TaskRunner, type TaskEvent } from "./session.js";
 import { createStreamPublisher } from "./stream.js";
@@ -122,15 +122,33 @@ async function main() {
   }
 
   console.log(pc.bold("[run-task] cloning target repo..."));
-  run(`rm -rf "${targetDir}" && git clone --branch ${targetBranch} --single-branch ${targetRepoUrl} "${targetDir}"`, workDir, "inherit");
+  if (process.env.REVIEW_MODE === "true") {
+    if (existsSync(`${targetDir}/.git`)) {
+      console.log(pc.bold("[run-task] using existing repo for review..."));
+      run(
+        `git config user.name "Daybreak Bot" && git config user.email "daybreak@example.com" && git fetch origin && git checkout ${prBranch} && git pull origin ${prBranch}`,
+        targetDir,
+        "inherit",
+      );
+    } else {
+      run(`git clone --branch ${prBranch} --single-branch ${targetRepoUrl} "${targetDir}"`, workDir, "inherit");
+      run(
+        `git config user.name "Daybreak Bot" && git config user.email "daybreak@example.com"`,
+        targetDir,
+        "inherit",
+      );
+    }
+  } else {
+    run(`rm -rf "${targetDir}" && git clone --branch ${targetBranch} --single-branch ${targetRepoUrl} "${targetDir}"`, workDir, "inherit");
 
-  // Create the feature branch and set git identity so the agent cannot
-  // accidentally push to the protected target branch.
-  run(
-    `git config user.name "Daybreak Bot" && git config user.email "daybreak@example.com" && git checkout -b ${prBranch}`,
-    targetDir,
-    "inherit",
-  );
+    // Create the feature branch and set git identity so the agent cannot
+    // accidentally push to the protected target branch.
+    run(
+      `git config user.name "Daybreak Bot" && git config user.email "daybreak@example.com" && git checkout -b ${prBranch}`,
+      targetDir,
+      "inherit",
+    );
+  }
 
   console.log(pc.bold("[run-task] config:"), {
     protectedBranches: config.protectedBranches,
@@ -179,6 +197,17 @@ async function main() {
       traceId: result.traceId,
       provider: result.provider,
     });
+
+    if (process.env.REVIEW_MODE === "true") {
+      publisher.publish(result.success ? "review_complete" : "review_failed", {
+        success: result.success,
+        summary: result.summary,
+        error: result.error,
+      });
+      if (result.success) {
+        publisher.publish("commit_pushed", { prBranch });
+      }
+    }
 
     process.exitCode = result.success ? 0 : 1;
   } catch (error) {

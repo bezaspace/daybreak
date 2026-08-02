@@ -18,6 +18,8 @@ export interface PersistedTask {
   github_sender?: string | null;
   pr_number?: number | null;
   prompt?: string | null;
+  sandbox_id?: string | null;
+  keep_alive_until?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -49,6 +51,8 @@ export interface Task {
   githubSender?: string;
   prNumber?: number;
   prompt?: string;
+  sandboxId?: string;
+  keepAliveUntil?: number;
 }
 
 export interface StreamEvent {
@@ -85,6 +89,8 @@ function toTask(row: PersistedTask): Task {
     githubSender: row.github_sender ?? undefined,
     prNumber: row.pr_number ?? undefined,
     prompt: row.prompt ?? undefined,
+    sandboxId: row.sandbox_id ?? undefined,
+    keepAliveUntil: row.keep_alive_until ? new Date(row.keep_alive_until).getTime() : undefined,
   };
 }
 
@@ -108,6 +114,8 @@ export async function persistTask(task: Task): Promise<boolean> {
     github_sender: task.githubSender ?? null,
     pr_number: task.prNumber ?? null,
     prompt: task.prompt ?? null,
+    sandbox_id: task.sandboxId ?? null,
+    keep_alive_until: task.keepAliveUntil ? new Date(task.keepAliveUntil).toISOString() : null,
     updated_at: new Date().toISOString(),
   });
   if (error) {

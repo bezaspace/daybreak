@@ -39,7 +39,7 @@ function parseRepo(repoUrl: string): { owner: string; repo: string } | undefined
   return undefined;
 }
 
-async function createPullRequest(repoUrl: string, headBranch: string, baseBranch: string, token: string): Promise<string | undefined> {
+async function createPullRequest(repoUrl: string, headBranch: string, baseBranch: string, token: string): Promise<{ url: string; number: number } | undefined> {
   const parsed = parseRepo(repoUrl);
   if (!parsed) return undefined;
   const title = `fix: automated fix from Daybreak`;
@@ -59,8 +59,8 @@ async function createPullRequest(repoUrl: string, headBranch: string, baseBranch
     console.error(`[control-plane] PR creation failed: ${res.status} ${text}`);
     return undefined;
   }
-  const data = (await res.json()) as { html_url: string };
-  return data.html_url;
+  const data = (await res.json()) as { html_url: string; number: number };
+  return { url: data.html_url, number: data.number };
 }
 
 function getRedis() {
@@ -238,7 +238,9 @@ async function spawnTask(spec: { repo: string; branch: string; prBranch?: string
     `--repo=${task.repo}`,
     `--branch=${task.branch}`,
     `--task-id=${task.id}`,
+    `--pr-branch=${task.prBranch}`,
     `--template=${config.e2bTemplate || "base"}`,
+    "--keep-alive",
   ];
   if (spec.prompt) {
     sandboxArgs.push(`--prompt=${spec.prompt}`);
@@ -267,9 +269,20 @@ async function spawnTask(spec: { repo: string; branch: string; prBranch?: string
     try {
       const redis = getRedis();
       const raw = await redis.lrange(`daybreak:stream:${task.id}`, 0, -1);
-      const final = raw
-        .map((item) => (typeof item === "string" ? (JSON.parse(item) as StreamEvent) : (item as StreamEvent)))
-        .find((e) => e.type === "task_complete" || e.type === "task_failed");
+      const events = raw.map((item) => (typeof item === "string" ? (JSON.parse(item) as StreamEvent) : (item as StreamEvent)));
+
+      const created = events.find((e) => e.type === "sandbox_created" || e.type === "sandbox_keep_alive");
+      if (created?.data && typeof created.data === "object") {
+        const d = created.data as Record<string, unknown>;
+        const sandboxId = typeof d.sandboxId === "string" ? d.sandboxId : undefined;
+        const keepAliveUntil = typeof d.keepAliveUntil === "number" ? d.keepAliveUntil : undefined;
+        if (sandboxId) {
+          task.sandboxId = sandboxId;
+          task.keepAliveUntil = keepAliveUntil;
+        }
+      }
+
+      const final = events.find((e) => e.type === "task_complete" || e.type === "task_failed");
       if (final?.data && typeof final.data === "object") {
         const d = final.data as Record<string, unknown>;
         const metrics = d.metrics as { estimatedCostUsd?: number } | undefined;
@@ -288,12 +301,13 @@ async function spawnTask(spec: { repo: string; branch: string; prBranch?: string
     await updateTask(task.id, task);
 
     if (task.status === "complete" && config.githubToken) {
-      const prUrl = await createPullRequest(task.repo, task.prBranch, task.branch, config.githubToken);
-      if (prUrl) {
-        task.prUrl = prUrl;
+      const pr = await createPullRequest(task.repo, task.prBranch, task.branch, config.githubToken);
+      if (pr) {
+        task.prUrl = pr.url;
+        task.prNumber = pr.number;
         tasks.set(task.id, task);
-        await updateTask(task.id, { prUrl });
-        await publishEvent(task.id, "pr_created", { prUrl, prBranch: task.prBranch, baseBranch: task.branch });
+        await updateTask(task.id, { prUrl: pr.url, prNumber: pr.number });
+        await publishEvent(task.id, "pr_created", { prUrl: pr.url, prNumber: pr.number, prBranch: task.prBranch, baseBranch: task.branch });
       }
     }
   });
@@ -306,6 +320,121 @@ async function createPendingTask(spec: { repo: string; branch: string; prBranch:
   tasks.set(task.id, task);
   await persistTask(task);
   await publishEvent(task.id, "task_pending", { triggerSource: task.triggerSource, githubSender: task.githubSender, prNumber: task.prNumber });
+  return task;
+}
+
+async function findOriginalTask(repo: string, prNumber: number, prBranch: string): Promise<Task | undefined> {
+  const memory = Array.from(tasks.values()).find((t) => t.repo === repo && (t.prNumber === prNumber || t.prBranch === prBranch));
+  if (memory) return memory;
+  const db = await getTasks();
+  return db.find((t) => t.repo === repo && (t.prNumber === prNumber || t.prBranch === prBranch));
+}
+
+function buildSpawnEnv(taskId: string, prBranch: string, repo: string, branch: string): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    E2B_TEMPLATE: config.e2bTemplate || "base",
+    TASK_ID: taskId,
+    PR_BRANCH_NAME: prBranch,
+    UPSTASH_REDIS_REST_URL: config.upstashRedisRestUrl || process.env.UPSTASH_REDIS_REST_URL || "",
+    UPSTASH_REDIS_TOKEN: config.upstashRedisToken || process.env.UPSTASH_REDIS_TOKEN || "",
+    LANGFUSE_PUBLIC_KEY: config.langfusePublicKey || process.env.LANGFUSE_PUBLIC_KEY || "",
+    LANGFUSE_SECRET_KEY: config.langfuseSecretKey || process.env.LANGFUSE_SECRET_KEY || "",
+    LANGFUSE_BASE_URL: config.langfuseBaseUrl || process.env.LANGFUSE_BASE_URL || "",
+    MAX_TURNS: String(config.maxTurns),
+    MAX_WALL_CLOCK_MINUTES: String(config.maxWallClockMinutes),
+    MAX_COST_USD: String(config.maxCostUsd),
+    COMPACTION_ENABLED: String(config.compactionEnabled),
+    COMPACTION_RESERVE_TOKENS: String(config.compactionReserveTokens),
+    COMPACTION_KEEP_RECENT_TOKENS: String(config.compactionKeepRecentTokens),
+    GITHUB_TOKEN: config.githubToken || "",
+    TARGET_REPO_URL: repo,
+    TARGET_BRANCH: branch,
+  };
+}
+
+async function runReview(spec: { repo: string; baseBranch: string; headBranch: string; prNumber: number; prompt: string; githubSender?: string }): Promise<Task> {
+  const repoUrl = spec.repo;
+  const baseRef = spec.baseBranch;
+  const headRef = spec.headBranch;
+  const prNumber = spec.prNumber;
+
+  const originalTask = await findOriginalTask(repoUrl, prNumber, headRef);
+  const taskId = originalTask?.id ?? randomUUID();
+  const prBranch = originalTask?.prBranch ?? headRef;
+
+  let task: Task;
+  if (!originalTask) {
+    task = taskFrom({
+      id: taskId,
+      repo: repoUrl,
+      branch: baseRef,
+      prBranch,
+      prNumber,
+      triggerSource: "review_comment",
+      githubSender: spec.githubSender,
+      prompt: spec.prompt,
+      status: "running",
+    });
+  } else {
+    task = { ...originalTask, status: "running", prNumber: originalTask.prNumber ?? prNumber, prompt: spec.prompt };
+  }
+  tasks.set(taskId, task);
+  await persistTask(task);
+
+  const sandboxArgs = [
+    "--filter",
+    "agent-runner",
+    "sandbox",
+    `--repo=${repoUrl}`,
+    `--branch=${baseRef}`,
+    `--task-id=${taskId}`,
+    `--pr-branch=${prBranch}`,
+    `--template=${config.e2bTemplate || "base"}`,
+    "--review",
+    "--keep-alive",
+  ];
+
+  if (task.sandboxId && task.keepAliveUntil && Date.now() < task.keepAliveUntil) {
+    sandboxArgs.push(`--connect=${task.sandboxId}`, "--fallback-create");
+  }
+  if (spec.prompt) {
+    sandboxArgs.push(`--prompt=${spec.prompt}`);
+  }
+
+  const env = buildSpawnEnv(taskId, prBranch, repoUrl, baseRef);
+  if (spec.prompt) {
+    env.TASK_PROMPT = spec.prompt;
+    env.REVIEW_MODE = "true";
+  }
+
+  ensureLogDir();
+  const logPath = getLogPath(taskId);
+  await appendFile(logPath, `[${new Date().toISOString()}] review ${taskId} spawned\n`).catch(() => {});
+
+  const child = spawn("pnpm", sandboxArgs, { cwd: repoRoot, env, stdio: ["ignore", "pipe", "pipe"], detached: true });
+
+  function forwardLog(chunk: Buffer | string) {
+    const text = typeof chunk === "string" ? chunk : chunk.toString();
+    appendLog(taskId, text).catch(() => {});
+  }
+
+  if (child.stdout) child.stdout.on("data", forwardLog);
+  if (child.stderr) child.stderr.on("data", forwardLog);
+
+  child.unref();
+
+  child.on("exit", async (code) => {
+    await syncEventsFromRedis(taskId);
+    const t = tasks.get(taskId);
+    if (!t) return;
+    t.endedAt = Date.now();
+    t.exitCode = code ?? undefined;
+    t.status = code === 0 ? "complete" : "failed";
+    tasks.set(taskId, t);
+    await updateTask(taskId, t);
+  });
+
   return task;
 }
 
@@ -463,7 +592,7 @@ app.post(
         const headRef = typeof head?.ref === "string" ? head.ref : `daybreak/${randomUUID()}`;
         const prNumber = typeof pullRequest.number === "number" ? pullRequest.number : 0;
         const prompt = buildReviewPrompt(repoUrl, prNumber, baseRef, headRef, stripMention(commentBody));
-        const task = await createPendingTask({ repo: repoUrl, branch: baseRef, prBranch: headRef, prompt, triggerSource: "review_comment", githubSender: typeof sender === "string" ? sender : undefined, prNumber });
+        const task = await runReview({ repo: repoUrl, baseBranch: baseRef, headBranch: headRef, prNumber, prompt, githubSender: typeof sender === "string" ? sender : undefined });
         return c.json({ taskId: task.id, repo: repoFullName, branch: baseRef, prBranch: headRef, status: task.status }, 202);
       }
       case "pull_request_review": {
@@ -486,7 +615,7 @@ app.post(
         const headRef = typeof head?.ref === "string" ? head.ref : `daybreak/${randomUUID()}`;
         const prNumber = typeof pullRequest.number === "number" ? pullRequest.number : 0;
         const prompt = buildReviewPrompt(repoUrl, prNumber, baseRef, headRef, stripMention(reviewBody));
-        const task = await createPendingTask({ repo: repoUrl, branch: baseRef, prBranch: headRef, prompt, triggerSource: "review_comment", githubSender: typeof sender === "string" ? sender : undefined, prNumber });
+        const task = await runReview({ repo: repoUrl, baseBranch: baseRef, headBranch: headRef, prNumber, prompt, githubSender: typeof sender === "string" ? sender : undefined });
         return c.json({ taskId: task.id, repo: repoFullName, branch: baseRef, prBranch: headRef, status: task.status }, 202);
       }
       default: {
