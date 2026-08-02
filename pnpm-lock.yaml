@@ -99,6 +99,9 @@ importers:
       '@upstash/redis':
         specifier: ^1.38.0
         version: 1.38.0
+      e2b:
+        specifier: ^2.37.0
+        version: 2.37.0
       hono:
         specifier: ^4.12.32
         version: 4.12.32

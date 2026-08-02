@@ -2,6 +2,7 @@
 import { loadConfig } from "@daybreak/shared";
 import { execSync } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import pc from "picocolors";
 import { TaskRunner, type TaskEvent } from "./session.js";
 import { createStreamPublisher } from "./stream.js";
@@ -15,6 +16,7 @@ const targetBranch = process.env.TARGET_BRANCH || "main";
 const targetDir = process.env.TARGET_DIR || `${workDir}/target`;
 const taskId = process.env.TASK_ID || `task-${Date.now()}`;
 const rewindToCheckpoint = process.env.REWIND_TO_CHECKPOINT;
+const forkFromCheckpoint = process.env.FORK_FROM_CHECKPOINT;
 const parentTaskId = process.env.PARENT_TASK_ID || taskId;
 const prBranch = process.env.PR_BRANCH_NAME || `daybreak/${taskId}`;
 const autoApprove = process.env.AUTO_APPROVE !== "false";
@@ -28,7 +30,7 @@ function getDefaultPrompt(): string {
   return `You are in a git repository at ${targetDir}. There is a failing test. Read the source and test files, understand the bug, make the minimal fix, and run the test command until it passes.${pushInstructions}`;
 }
 
-const prompt = process.env.TASK_PROMPT || getDefaultPrompt();
+const prompt = process.env.FORK_PROMPT || process.env.TASK_PROMPT || getDefaultPrompt();
 const systemPrompt = process.env.TASK_SYSTEM_PROMPT || `You are Daybreak, an autonomous coding agent running in an E2B sandbox. You have read, bash, edit, write, and browser tools. Investigate, fix, verify, then${pushAfterFix ? " commit and push to a feature branch" : " report the fix"}. Use the browser tool to visually verify web apps when relevant.`;
 
 function writeGitAskpassScript(path: string) {
@@ -54,6 +56,23 @@ function omitScreenshot<T>(obj: T): T {
     clone.details = details;
   }
   return clone as T;
+}
+
+function installDependencies(cwd: string) {
+  const has = (name: string) => existsSync(join(cwd, name));
+  if (has("pnpm-lock.yaml")) {
+    run("pnpm install --frozen-lockfile", cwd, "inherit");
+  } else if (has("package-lock.json")) {
+    run("npm ci", cwd, "inherit");
+  } else if (has("yarn.lock")) {
+    run("yarn install --frozen-lockfile", cwd, "inherit");
+  } else if (has("requirements.txt")) {
+    run("pip install -r requirements.txt", cwd, "inherit");
+  } else if (has("pyproject.toml")) {
+    run("pip install -e .", cwd, "inherit");
+  } else {
+    console.log(pc.yellow("[run-task] no known lockfile found; skipping dependency install"));
+  }
 }
 
 function toStreamData(event: TaskEvent): unknown {
@@ -117,6 +136,8 @@ function toStreamData(event: TaskEvent): unknown {
     }
     case "task_rewind":
       return { checkpointId: event.checkpointId, prompt: event.prompt };
+    case "branch_forked":
+      return { checkpointId: event.checkpointId, prompt: event.prompt, parentTaskId: event.parentTaskId };
     default:
       return {};
   }
@@ -143,9 +164,10 @@ async function main() {
   }
 
   let checkpoint: Checkpoint | undefined;
+  const checkpointId = rewindToCheckpoint || forkFromCheckpoint;
 
-  if (rewindToCheckpoint) {
-    console.log(pc.bold(`[run-task] restoring checkpoint ${rewindToCheckpoint}...`));
+  if (checkpointId) {
+    console.log(pc.bold(`[run-task] ${forkFromCheckpoint ? "forking" : "restoring"} checkpoint ${checkpointId}...`));
     const cpSessionStore = new SessionStore({
       taskId: parentTaskId,
       cwd: targetDir,
@@ -159,20 +181,29 @@ async function main() {
       supabaseUrl: config.supabaseUrl,
       supabaseServiceKey: config.supabaseServiceKey,
     });
-    const found = await cpStore.getCheckpoint(rewindToCheckpoint);
+    const found = await cpStore.getCheckpoint(checkpointId);
     if (!found || !found.gitCommit) {
-      throw new Error(`Checkpoint ${rewindToCheckpoint} not found or has no git commit`);
+      throw new Error(`Checkpoint ${checkpointId} not found or has no git commit`);
     }
     checkpoint = found;
 
     if (!existsSync(`${targetDir}/.git`)) {
-      throw new Error(`Repository at ${targetDir} not found; cannot rewind`);
+      if (!targetRepoUrl) {
+        throw new Error(`Repository at ${targetDir} not found and TARGET_REPO_URL is not set; cannot ${forkFromCheckpoint ? "fork" : "rewind"}`);
+      }
+      run(`git clone --branch ${targetBranch} --single-branch ${targetRepoUrl} "${targetDir}"`, workDir, "inherit");
+      run(`git config user.name "Daybreak Bot" && git config user.email "daybreak@example.com"`, targetDir, "inherit");
     }
     run(
       `git config user.name "Daybreak Bot" && git config user.email "daybreak@example.com" && git reset --hard && git checkout -B ${prBranch} ${checkpoint.gitCommit} && git reset --hard && git clean -fd`,
       targetDir,
       "inherit",
     );
+
+    if (forkFromCheckpoint) {
+      console.log(pc.bold("[run-task] installing dependencies for fork..."));
+      installDependencies(targetDir);
+    }
   } else {
     console.log(pc.bold("[run-task] cloning target repo..."));
     if (process.env.REVIEW_MODE === "true") {
@@ -221,8 +252,9 @@ async function main() {
       cwd: targetDir,
       systemPrompt,
       autoApprove,
-      taskId: parentTaskId,
+      taskId,
       checkpoint,
+      isFork: Boolean(forkFromCheckpoint),
       onEvent: (event) => {
         publisher.publish(event.type, toStreamData(event));
         if (event.type === "tool_execution_update" && event.toolName === "browser") {

@@ -77,9 +77,26 @@ The `packages/agent-runner/src/spikes/session-fork.ts` script proves that `pi-co
 
 The remaining Phase 4 work is to wire this into `TaskRunner` as a `CheckpointStore` that writes `(turn, gitCommit, sessionRef, leafId, sessionJsonl)` tuples, and then to add per-turn git commits and E2B snapshot benchmarks.
 
-## 5. Recommended Phase 4 path
+## 4. Same-sandbox rewind (M3)
 
-1. Implement **git-based filesystem rewind** first — cheap, deterministic, and sufficient for most coding tasks.
-2. Add **JSONL session-store persistence** to `TaskRunner` so each turn produces a portable session snapshot.
-3. Measure E2B cold-snapshot latency and cost before relying on it for cross-sandbox forks.
-4. Use E2B snapshots only for coarse checkpoints (task start/end, expensive setup) and filesystem-only snapshots where memory state is not required.
+M3 shipped `REWIND_TO_CHECKPOINT` / `PARENT_TASK_ID` support in `packages/agent-runner/src/run-task.ts` and `POST /api/tasks/:id/rewind` in the control plane:
+
+- The target directory is not deleted; instead the repo is reset to the checkpoint git commit and the working tree is cleaned.
+- `SessionStore.restore(sessionRef, sessionDir)` copies the checkpoint's JSONL snapshot into a new session file and `SessionManager.open` loads it.
+- `TaskRunner` resumes from `checkpoint.turn` and `checkpoint.costUsd`, then emits `checkpoint_restored` and `task_rewind` stream events.
+
+## 5. Cross-sandbox fork (M4)
+
+M4 adds `POST /api/checkpoints/:checkpointId/fork` and two fork strategies:
+
+- **Strategy A (snapshot)**: `Sandbox.createSnapshot(sandboxId)` creates a point-in-time snapshot of the parent sandbox. A new sandbox is spawned with `Sandbox.create({ template: snapshotId })`. This preserves filesystem, installed dependencies, and memory state, but E2B docs note snapshots are slower and less resource-efficient than declarative templates because memory fragmentation reduces prefetch effectiveness.
+- **Strategy B (git + re-install)**: a fresh sandbox is spawned from the configured template, the repo is cloned, checked out to the checkpoint commit, and dependencies are re-installed from the lockfile (`package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `requirements.txt`, `pyproject.toml`). The Pi session JSONL is restored from Supabase (`sessionRef` = `snapshot:<id>`). This is the **default** because it is cheaper and usually faster than full memory snapshots.
+
+The `packages/agent-runner/src/spikes/snapshot-benchmark.ts` spike can be run to measure snapshot create/resume latency on a real target repo. Snapshot size and credit impact are not directly exposed by the E2B SDK; estimate from sandbox runtime seconds and the E2B usage calculator.
+
+## 6. Recommended Phase 4 path
+
+1. Use **git-based rewind** for routine per-turn branching (M3).
+2. Use **git + re-install fork** (Strategy B) as the default cross-sandbox branch (M4).
+3. Use **E2B snapshots** (Strategy A) only when the benchmark shows acceptable latency/cost or when the installed state is too expensive to rebuild.
+4. Keep session snapshots in Supabase so they are portable across sandboxes.

@@ -122,6 +122,10 @@ function formatEvent(event: StreamEvent): string {
     const data = event.data as { checkpointId?: string; prompt?: string };
     return `[${time}] task_rewind: checkpoint=${data.checkpointId ?? "-"} prompt=${(data.prompt ?? "").slice(0, 80)}`;
   }
+  if (event.type === "branch_forked") {
+    const data = event.data as { checkpointId?: string; prompt?: string; parentTaskId?: string };
+    return `[${time}] branch_forked: parent=${data.parentTaskId ?? "-"} checkpoint=${data.checkpointId ?? "-"} prompt=${(data.prompt ?? "").slice(0, 80)}`;
+  }
   if (event.type === "commit_pushed") {
     const data = event.data as { prBranch?: string };
     return `[${time}] commit_pushed: ${data.prBranch || "-"}`;

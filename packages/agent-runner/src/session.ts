@@ -20,7 +20,8 @@ type FallbackAppliedEvent = { type: "fallback_applied" } & ProviderSwitchInfo;
 type CheckpointCreatedEvent = { type: "checkpoint_created"; checkpoint: Checkpoint };
 type CheckpointRestoredEvent = { type: "checkpoint_restored"; checkpoint: Checkpoint };
 type TaskRewindEvent = { type: "task_rewind"; checkpointId: string; prompt: string };
-export type TaskEvent = AgentSessionEvent | ProviderSwitchEvent | FallbackAppliedEvent | CheckpointCreatedEvent | CheckpointRestoredEvent | TaskRewindEvent;
+type BranchForkedEvent = { type: "branch_forked"; checkpointId: string; prompt: string; parentTaskId: string };
+export type TaskEvent = AgentSessionEvent | ProviderSwitchEvent | FallbackAppliedEvent | CheckpointCreatedEvent | CheckpointRestoredEvent | TaskRewindEvent | BranchForkedEvent;
 
 export interface RunOptions {
   prompt: string;
@@ -31,6 +32,7 @@ export interface RunOptions {
   onEvent?: (event: TaskEvent) => void;
   taskId?: string;
   checkpoint?: Checkpoint;
+  isFork?: boolean;
 }
 
 export class TaskRunner {
@@ -69,7 +71,7 @@ export class TaskRunner {
   }
 
   async run(options: RunOptions): Promise<TaskResult> {
-    const { prompt, cwd, systemPrompt, autoApprove, onStream, onEvent, taskId: explicitTaskId, checkpoint } = options;
+    const { prompt, cwd, systemPrompt, autoApprove, onStream, onEvent, taskId: explicitTaskId, checkpoint, isFork } = options;
     this.onEvent = onEvent;
 
     const telemetry = initTelemetry({
@@ -133,7 +135,11 @@ export class TaskRunner {
       this.metrics.setCostUsd(checkpoint.costUsd ?? 0);
       this.checkpointStore.setLastCheckpointId(checkpoint.id);
       this.onEvent?.({ type: "checkpoint_restored", checkpoint });
-      this.onEvent?.({ type: "task_rewind", checkpointId: checkpoint.id, prompt });
+      if (isFork) {
+        this.onEvent?.({ type: "branch_forked", checkpointId: checkpoint.id, prompt, parentTaskId: checkpoint.taskId });
+      } else {
+        this.onEvent?.({ type: "task_rewind", checkpointId: checkpoint.id, prompt });
+      }
     } else {
       sessionManager = SessionManager.create(cwd, sessionDir);
     }

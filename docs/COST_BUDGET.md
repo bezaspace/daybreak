@@ -48,6 +48,20 @@ Free providers are used wherever possible. For paid fallbacks, the target model 
 - The `daybreak-browser` template uses 2 vCPU / 1536 MB RAM, which is within the free-tier allowance and is required for Chromium's V8 renderer to avoid OOM.
 - Time-travel snapshots are the main wildcard: a full filesystem snapshot per turn is expensive, so Phase 4 should benchmark snapshot size and latency before enabling per-turn snapshots.
 
+### Cross-sandbox fork (M4)
+
+M4 supports two fork strategies. The default is **git + re-install**; the alternative is an **E2B snapshot**. Choose based on the `packages/agent-runner/src/spikes/snapshot-benchmark.ts` results.
+
+- **Git + re-install (default):** pays only for the fresh sandbox cold start plus the dependency install time. No snapshot storage. With the `daybreak-browser` template, the base environment (Node 22, Chromium, `playwright-core`) is pre-baked; only repo-specific dependencies are re-installed from the lockfile. This is the cheapest and usually fastest option.
+- **E2B snapshot:** pays for the time to create the snapshot (sandbox is paused during snapshotting) plus ongoing snapshot storage, then pays for the new sandbox runtime from that image. E2B snapshots are slower to spawn and less resource-efficient than templates because memory fragmentation reduces prefetch effectiveness. Use this only when the benchmark shows the snapshot create+spawn time is lower than a clean install, or when the installed state is too expensive to rebuild.
+
+Estimated costs (Hobby tier, see https://e2b.dev/pricing for current rates):
+
+- Sandbox compute: ~$0.000014/s for 2 vCPU / 1.5 GB RAM.
+- A 60-second dependency install in a fresh sandbox costs ~$0.00084 in compute.
+- A full snapshot restore that takes 20 seconds to spawn costs ~$0.00028 in compute, plus snapshot storage ($0.0000045/GiB/s).
+- Snapshot creation time is dominated by filesystem and memory size; the E2B SDK does not expose snapshot size or credit cost directly, so measure with the spike and monitor the E2B dashboard.
+
 #### Sandbox keep-alive (Phase 3 review loop)
 - When an issue-comment task opens a PR, the sandbox stays alive for `REVIEW_KEEP_ALIVE_MS` (default 15 minutes) so a later `pull_request_review_comment` can reconnect to the same sandbox instead of paying for a cold start.
 - Hobby-tier sandboxes have a maximum lifetime of 1 hour, so `REVIEW_KEEP_ALIVE_MS` is capped below that. The default 15 minutes balances responsiveness with cost.

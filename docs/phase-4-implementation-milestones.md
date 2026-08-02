@@ -129,23 +129,23 @@ This is the first demoable time-travel slice: rewind within the same sandbox bef
 
 **What it ships:** A new, parallel sandbox can be spawned from a checkpoint with an edited prompt. The implementation strategy (E2B snapshot vs. git checkout + dependency re-install) is chosen after measuring E2B cold-snapshot latency and cost.
 
-- [ ] Add a measurement spike in `packages/agent-runner/src/spikes/snapshot-benchmark.ts`:
+- [x] Add a measurement spike in `packages/agent-runner/src/spikes/snapshot-benchmark.ts`:
   - Create an E2B sandbox, install Node/Chromium, clone a small repo, run a test
   - Call `sandbox.createSnapshot()`
   - Measure wall-clock time, snapshot size, and credit impact
   - Spawn a new sandbox from the snapshot and verify it resumes
-- [ ] Update `docs/TIME_TRAVEL.md` and `docs/COST_BUDGET.md` with the measurement results and the chosen default strategy.
-- [ ] Add `POST /api/checkpoints/:checkpointId/fork` to the control plane:
+- [x] Update `docs/TIME_TRAVEL.md` and `docs/COST_BUDGET.md` with the measurement results and the chosen default strategy.
+- [x] Add `POST /api/checkpoints/:checkpointId/fork` to the control plane:
   - Looks up the checkpoint and its parent task
   - Creates a new task record (`parentTaskId`, `parentCheckpointId`, new `prBranch`)
   - Spawns a new sandbox using the chosen strategy:
     - **Strategy A (E2B snapshot):** if snapshot benchmark shows acceptable latency/cost, create a snapshot from the parent sandbox at the checkpoint and spawn the new sandbox from it.
     - **Strategy B (git + re-install):** spawn a fresh sandbox from the `daybreak-browser` template, clone the repo, checkout the checkpoint commit, detect package manager (`package-lock.json` → `npm ci`, `pnpm-lock.yaml` → `pnpm install --frozen-lockfile`, `yarn.lock` → `yarn install --frozen-lockfile`, `requirements.txt` → `pip install`, etc.) and re-run install, then restore the session JSONL.
   - Injects the restored session state and the edited prompt into the new `run-task` bundle
-- [ ] Add `--fork-from-checkpoint=<checkpointId>` and `--fork-prompt=<prompt>` to `run-task.ts`.
-- [ ] Add `--e2b-snapshot-id=<snapshotId>` to `sandbox.ts` so `Sandbox.create({ template: snapshotId })` can be used when Strategy A is selected.
-- [ ] Emit `branch_forked`, `checkpoint_restored`, `sandbox_created`, and `task_start` events for the new branch.
-- [ ] Link the new task to its parent in Supabase (`parent_task_id`, `parent_checkpoint_id`).
+- [x] Add `--fork-from-checkpoint=<checkpointId>` and `--fork-prompt=<prompt>` to `run-task.ts`.
+- [x] Add `--e2b-snapshot-id=<snapshotId>` to `sandbox.ts` so `Sandbox.create({ template: snapshotId })` can be used when Strategy A is selected.
+- [x] Emit `branch_forked`, `checkpoint_restored`, `sandbox_created`, and `task_start` events for the new branch.
+- [x] Link the new task to its parent in Supabase (`parent_task_id`, `parent_checkpoint_id`).
 
 **Acceptance:**
 - Call `POST /api/checkpoints/:checkpointId/fork` with a new prompt.

@@ -12,6 +12,7 @@ import { appendFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { serve } from "@hono/node-server";
+import { Sandbox } from "e2b";
 import {
   getTasks,
   getTask,
@@ -131,10 +132,10 @@ async function publishEvent(taskId: string, type: string, data: unknown) {
 const tasks = new Map<string, Task>();
 const rewindingTasks = new Set<string>();
 
-function taskFrom(body: { repo: string; branch: string; id?: string; prBranch?: string; triggerSource?: string; githubSender?: string; prNumber?: number; prompt?: string; status?: Task["status"]; workspaceId?: string }): Task {
+function taskFrom(body: { repo: string; branch: string; id?: string; prBranch?: string; triggerSource?: string; githubSender?: string; prNumber?: number; prompt?: string; status?: Task["status"]; workspaceId?: string; parentTaskId?: string; parentCheckpointId?: string }): Task {
   const id = body.id ?? randomUUID();
   const prBranch = body.prBranch ?? `daybreak/${id}`;
-  return { id, repo: body.repo, branch: body.branch, prBranch, status: body.status ?? "running", startedAt: Date.now(), triggerSource: body.triggerSource, githubSender: body.githubSender, prNumber: body.prNumber, prompt: body.prompt, workspaceId: body.workspaceId };
+  return { id, repo: body.repo, branch: body.branch, prBranch, status: body.status ?? "running", startedAt: Date.now(), triggerSource: body.triggerSource, githubSender: body.githubSender, prNumber: body.prNumber, prompt: body.prompt, workspaceId: body.workspaceId, parentTaskId: body.parentTaskId, parentCheckpointId: body.parentCheckpointId };
 }
 
 async function syncEventsFromRedis(taskId: string) {
@@ -425,6 +426,145 @@ async function spawnRewind(parent: Task, sandboxId: string, checkpointId: string
   });
 
   return parent;
+}
+
+async function resolveParentSandboxId(parent: Task): Promise<string | undefined> {
+  if (parent.sandboxId) return parent.sandboxId;
+  await syncEventsFromRedis(parent.id);
+  const events = await getEvents(parent.id);
+  const created = events.find((e) => e.type === "sandbox_created" || e.type === "sandbox_resumed");
+  return created?.data && typeof created.data === "object" ? (created.data as Record<string, unknown>).sandboxId as string | undefined : undefined;
+}
+
+async function spawnFork(
+  parent: Task,
+  checkpoint: { id: string; taskId: string },
+  prompt: string,
+  strategy: "git-reinstall" | "snapshot" = "git-reinstall",
+  snapshotId?: string,
+): Promise<Task> {
+  const prBranch = `daybreak/fork-${randomUUID()}`;
+  const child = taskFrom({
+    repo: parent.repo,
+    branch: parent.branch,
+    prBranch,
+    prompt,
+    status: "running",
+    parentTaskId: parent.id,
+    parentCheckpointId: checkpoint.id,
+    triggerSource: "fork",
+  });
+  tasks.set(child.id, child);
+  await persistTask(child);
+  await publishEvent(child.id, "task_start", { repo: child.repo, branch: child.branch, prBranch: child.prBranch, parentTaskId: parent.id, parentCheckpointId: checkpoint.id });
+
+  let e2bSnapshotId = snapshotId;
+  if (strategy === "snapshot") {
+    if (e2bSnapshotId) {
+      console.log(`[control-plane] using provided snapshot ${e2bSnapshotId} for fork ${child.id}`);
+    } else {
+      const sandboxId = await resolveParentSandboxId(parent);
+      if (!sandboxId) {
+        throw new Error(`Cannot create E2B snapshot: parent sandbox id not found for ${parent.id}`);
+      }
+      console.log(`[control-plane] creating E2B snapshot from sandbox ${sandboxId} for fork ${child.id}...`);
+      const snapshot = await Sandbox.createSnapshot(sandboxId, { apiKey: config.e2bApiKey });
+      e2bSnapshotId = snapshot.snapshotId;
+      console.log(`[control-plane] snapshot created: ${e2bSnapshotId}`);
+    }
+  }
+
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    E2B_TEMPLATE: config.e2bTemplate || "base",
+    TASK_ID: child.id,
+    PR_BRANCH_NAME: child.prBranch,
+    UPSTASH_REDIS_REST_URL: config.upstashRedisRestUrl || process.env.UPSTASH_REDIS_REST_URL || "",
+    UPSTASH_REDIS_TOKEN: config.upstashRedisToken || process.env.UPSTASH_REDIS_TOKEN || "",
+    LANGFUSE_PUBLIC_KEY: config.langfusePublicKey || process.env.LANGFUSE_PUBLIC_KEY || "",
+    LANGFUSE_SECRET_KEY: config.langfuseSecretKey || process.env.LANGFUSE_SECRET_KEY || "",
+    LANGFUSE_BASE_URL: config.langfuseBaseUrl || process.env.LANGFUSE_BASE_URL || "",
+    MAX_TURNS: String(config.maxTurns),
+    MAX_WALL_CLOCK_MINUTES: String(config.maxWallClockMinutes),
+    MAX_COST_USD: String(config.maxCostUsd),
+    COMPACTION_ENABLED: String(config.compactionEnabled),
+    COMPACTION_RESERVE_TOKENS: String(config.compactionReserveTokens),
+    COMPACTION_KEEP_RECENT_TOKENS: String(config.compactionKeepRecentTokens),
+    TASK_PROMPT: prompt,
+  };
+
+  const sandboxArgs = [
+    "--filter",
+    "agent-runner",
+    "sandbox",
+    `--repo=${child.repo}`,
+    `--branch=${child.branch}`,
+    `--pr-branch=${child.prBranch}`,
+    `--task-id=${child.id}`,
+    `--parent-task-id=${parent.id}`,
+    `--fork-from-checkpoint=${checkpoint.id}`,
+    `--fork-prompt=${prompt}`,
+    `--template=${config.e2bTemplate || "base"}`,
+  ];
+  if (e2bSnapshotId) {
+    sandboxArgs.push(`--e2b-snapshot-id=${e2bSnapshotId}`);
+  }
+
+  ensureLogDir();
+  const logPath = getLogPath(child.id);
+  await appendFile(logPath, `[${new Date().toISOString()}] fork ${child.id} from checkpoint ${checkpoint.id} (${strategy})\n`).catch(() => {});
+
+  const pnpm = spawn("pnpm", sandboxArgs, { cwd: repoRoot, env, stdio: ["ignore", "pipe", "pipe"], detached: true });
+
+  function forwardLog(chunk: Buffer | string) {
+    const text = typeof chunk === "string" ? chunk : chunk.toString();
+    appendLog(child.id, text).catch(() => {});
+  }
+
+  if (pnpm.stdout) pnpm.stdout.on("data", forwardLog);
+  if (pnpm.stderr) pnpm.stderr.on("data", forwardLog);
+
+  pnpm.unref();
+
+  pnpm.on("exit", async (code) => {
+    await syncEventsFromRedis(child.id);
+
+    try {
+      const redis = getRedis();
+      const raw = await redis.lrange(`daybreak:stream:${child.id}`, 0, -1);
+      const events = raw.map((item) => (typeof item === "string" ? (JSON.parse(item) as StreamEvent) : (item as StreamEvent)));
+
+      const final = events.find((e) => e.type === "task_complete" || e.type === "task_failed");
+      if (final?.data && typeof final.data === "object") {
+        const d = final.data as Record<string, unknown>;
+        const metrics = d.metrics as { estimatedCostUsd?: number } | undefined;
+        child.traceId = typeof d.traceId === "string" ? d.traceId : undefined;
+        child.provider = typeof d.provider === "string" ? d.provider : undefined;
+        child.costUsd = typeof metrics?.estimatedCostUsd === "number" ? metrics.estimatedCostUsd : undefined;
+      }
+    } catch (error) {
+      console.error(`[control-plane] failed to read final fork event for ${child.id}:`, error);
+    }
+
+    child.endedAt = Date.now();
+    child.exitCode = code ?? undefined;
+    child.status = code === 0 ? "complete" : "failed";
+    tasks.set(child.id, child);
+    await updateTask(child.id, child);
+
+    if (child.status === "complete" && config.githubToken) {
+      const pr = await createPullRequest(child.repo, child.prBranch, child.branch, config.githubToken);
+      if (pr) {
+        child.prUrl = pr.url;
+        child.prNumber = pr.number;
+        tasks.set(child.id, child);
+        await updateTask(child.id, { prUrl: pr.url, prNumber: pr.number });
+        await publishEvent(child.id, "pr_created", { prUrl: pr.url, prNumber: pr.number, prBranch: child.prBranch, baseBranch: child.branch });
+      }
+    }
+  });
+
+  return child;
 }
 
 async function createPendingTask(spec: { repo: string; branch: string; prBranch: string; prompt?: string; triggerSource: string; githubSender?: string; prNumber?: number }): Promise<Task> {
@@ -847,6 +987,36 @@ app.get("/api/checkpoints/:id", async (c) => {
   const checkpoint = await getCheckpoint(id);
   if (!checkpoint) return c.json({ error: "checkpoint not found" }, 404);
   return c.json(checkpoint);
+});
+
+app.post("/api/checkpoints/:checkpointId/fork", async (c) => {
+  const checkpointId = c.req.param("checkpointId");
+  const body = await c.req.json().catch(() => ({}));
+  const prompt = (body as Record<string, unknown>).prompt;
+  const strategy = (body as Record<string, unknown>).strategy ?? "git-reinstall";
+  const snapshotId = (body as Record<string, unknown>).snapshotId;
+  if (typeof prompt !== "string") {
+    return c.json({ error: "prompt is required" }, 400);
+  }
+  if (strategy !== "git-reinstall" && strategy !== "snapshot") {
+    return c.json({ error: "strategy must be git-reinstall or snapshot" }, 400);
+  }
+
+  const checkpoint = await getCheckpoint(checkpointId);
+  if (!checkpoint) return c.json({ error: "checkpoint not found" }, 404);
+
+  const parent = tasks.get(checkpoint.taskId) ?? (await getTask(checkpoint.taskId));
+  if (!parent) return c.json({ error: "parent task not found" }, 404);
+
+  const child = await spawnFork(
+    parent,
+    checkpoint,
+    prompt,
+    strategy as "git-reinstall" | "snapshot",
+    typeof snapshotId === "string" ? snapshotId : undefined,
+  );
+  await publishEvent(parent.id, "branch_forked", { childTaskId: child.id, checkpointId, prompt, strategy });
+  return c.json({ taskId: child.id, status: child.status, prBranch: child.prBranch, strategy }, 202);
 });
 
 app.post("/api/tasks/:id/rewind", async (c) => {

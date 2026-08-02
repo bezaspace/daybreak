@@ -24,6 +24,8 @@ export interface PersistedTask {
   workspace_id?: string | null;
   head_checkpoint_id?: string | null;
   root_checkpoint_id?: string | null;
+  parent_task_id?: string | null;
+  parent_checkpoint_id?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -60,6 +62,8 @@ export interface Task {
   workspaceId?: string;
   headCheckpointId?: string;
   rootCheckpointId?: string;
+  parentTaskId?: string;
+  parentCheckpointId?: string;
 }
 
 export interface PersistedWorkspace {
@@ -124,6 +128,8 @@ function toTask(row: PersistedTask): Task {
     workspaceId: row.workspace_id ?? undefined,
     headCheckpointId: row.head_checkpoint_id ?? undefined,
     rootCheckpointId: row.root_checkpoint_id ?? undefined,
+    parentTaskId: row.parent_task_id ?? undefined,
+    parentCheckpointId: row.parent_checkpoint_id ?? undefined,
   };
 }
 
@@ -152,6 +158,8 @@ export async function persistTask(task: Task): Promise<boolean> {
     workspace_id: task.workspaceId ?? null,
     head_checkpoint_id: task.headCheckpointId ?? null,
     root_checkpoint_id: task.rootCheckpointId ?? null,
+    parent_task_id: task.parentTaskId ?? null,
+    parent_checkpoint_id: task.parentCheckpointId ?? null,
     updated_at: new Date().toISOString(),
   });
   if (error) {
@@ -175,6 +183,8 @@ export async function updateTask(id: string, updates: Partial<Task>): Promise<bo
   if (updates.workspaceId !== undefined) payload.workspace_id = updates.workspaceId ?? null;
   if (updates.headCheckpointId !== undefined) payload.head_checkpoint_id = updates.headCheckpointId ?? null;
   if (updates.rootCheckpointId !== undefined) payload.root_checkpoint_id = updates.rootCheckpointId ?? null;
+  if (updates.parentTaskId !== undefined) payload.parent_task_id = updates.parentTaskId ?? null;
+  if (updates.parentCheckpointId !== undefined) payload.parent_checkpoint_id = updates.parentCheckpointId ?? null;
   const { error } = await supabase.from("tasks").update(payload).eq("id", id);
   if (error) {
     console.error("[db] updateTask error:", error.message);

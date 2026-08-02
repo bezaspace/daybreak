@@ -26,7 +26,8 @@ const SANDBOX_TIMEOUT_MS = 30 * 60 * 1000;
 
 async function main() {
   const config = loadConfig();
-  const templateName = getArg("--template") || config.e2bTemplate || "base";
+  const e2bSnapshotId = getArg("--e2b-snapshot-id");
+  const templateName = e2bSnapshotId || getArg("--template") || config.e2bTemplate || "base";
   const isBaseTemplate = templateName === "base";
   const targetRepo = getArg("--repo") || "https://github.com/bezaspace/daybreak-target";
   const targetBranch = getArg("--branch") || "main";
@@ -34,6 +35,8 @@ async function main() {
   const taskId = getArg("--task-id") || randomUUID();
   const taskPrompt = getArg("--prompt");
   const rewindToCheckpoint = getArg("--rewind-to-checkpoint");
+  const forkFromCheckpoint = getArg("--fork-from-checkpoint");
+  const forkPrompt = getArg("--fork-prompt");
   const parentTaskId = getArg("--parent-task-id") || taskId;
   const connectId = getArg("--connect");
   const isReview = hasArg("--review");
@@ -96,6 +99,8 @@ async function main() {
     TASK_PROMPT: taskPrompt || "",
     REVIEW_MODE: String(isReview),
     REWIND_TO_CHECKPOINT: rewindToCheckpoint || "",
+    FORK_FROM_CHECKPOINT: forkFromCheckpoint || "",
+    FORK_PROMPT: forkPrompt || "",
     PARENT_TASK_ID: parentTaskId,
     PW_EXECUTABLE_PATH: "/usr/bin/chromium",
     PLAYWRIGHT_BROWSERS_PATH: "0",
