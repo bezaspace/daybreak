@@ -107,6 +107,8 @@ Progress is measured by the completion of demoable vertical slices and objective
 
 ## 5. Phase 2 — Observability, Cost Control & Provider Resilience
 
+> **Implementation breakdown:** [docs/phase-2-implementation-milestones.md](docs/phase-2-implementation-milestones.md)
+
 **Goal:** Every prompt, token count, tool call, and latency is emitted as OpenTelemetry spans to Langfuse, the dashboard renders the reasoning tree, and the system survives primary LLM provider outages.
 
 - [ ] 5.1. **OTel instrumentation:** In the agent runner. A root `task` span with child spans per LLM call (model, prompt/completion token counts, latency) and per tool call (tool name, args, result size, latency).
