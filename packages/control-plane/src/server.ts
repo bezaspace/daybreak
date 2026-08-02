@@ -161,7 +161,14 @@ app.get("/api/config", (c) => {
 
 app.get("/api/tasks", async (c) => {
   const dbTasks = await getTasks();
-  return c.json(dbTasks.length ? dbTasks : Array.from(tasks.values()));
+  const merged = new Map<string, Task>();
+  for (const task of dbTasks) {
+    merged.set(task.id, task);
+  }
+  for (const task of tasks.values()) {
+    merged.set(task.id, task);
+  }
+  return c.json(Array.from(merged.values()));
 });
 
 app.post("/api/tasks", async (c) => {
@@ -238,12 +245,8 @@ app.post("/api/tasks", async (c) => {
   child.unref();
 
   child.on("exit", async (code) => {
-    task.endedAt = Date.now();
-    task.exitCode = code ?? undefined;
-    task.status = code === 0 ? "complete" : "failed";
-    tasks.set(task.id, task);
-
     await syncEventsFromRedis(task.id);
+
     try {
       const redis = getRedis();
       const raw = await redis.lrange(`daybreak:stream:${task.id}`, 0, -1);
@@ -260,6 +263,11 @@ app.post("/api/tasks", async (c) => {
     } catch (error) {
       console.error(`[control-plane] failed to read final event for ${task.id}:`, error);
     }
+
+    task.endedAt = Date.now();
+    task.exitCode = code ?? undefined;
+    task.status = code === 0 ? "complete" : "failed";
+    tasks.set(task.id, task);
     await updateTask(task.id, task);
 
     if (task.status === "complete" && config.githubToken) {

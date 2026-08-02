@@ -211,6 +211,7 @@ async function main() {
         traceUrl,
         provider: taskDetails.provider ?? metrics.provider,
         traceId: taskDetails.traceId ?? metrics.traceId,
+        estimatedCostUsd: typeof metrics.estimatedCostUsd === "number" ? metrics.estimatedCostUsd : taskDetails.costUsd,
         ...metrics,
       };
 

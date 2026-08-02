@@ -27,7 +27,12 @@ async function main() {
   const targetBranch = getArg("--branch") || "main";
   const taskId = getArg("--task-id") || randomUUID();
   const taskPrompt = getArg("--prompt");
-  const pushAfterFix = getArg("--push") !== "false";
+  const envPushAfterFix = process.env.PUSH_AFTER_FIX;
+  const argPushAfterFix = getArg("--push");
+  const pushAfterFix =
+    envPushAfterFix !== undefined
+      ? envPushAfterFix !== "false"
+      : argPushAfterFix !== "false";
 
   if (!config.e2bApiKey) {
     console.error(pc.red("E2B_API_KEY is required"));
