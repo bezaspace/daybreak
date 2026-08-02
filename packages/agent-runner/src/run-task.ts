@@ -14,6 +14,7 @@ const workDir = process.env.WORK_DIR || "/tmp";
 const targetRepoUrl = process.env.TARGET_REPO_URL;
 const targetBranch = process.env.TARGET_BRANCH || "main";
 const targetDir = process.env.TARGET_DIR || `${workDir}/target`;
+const forkSourceBranch = process.env.FORK_SOURCE_BRANCH || targetBranch;
 const taskId = process.env.TASK_ID || `task-${Date.now()}`;
 const rewindToCheckpoint = process.env.REWIND_TO_CHECKPOINT;
 const forkFromCheckpoint = process.env.FORK_FROM_CHECKPOINT;
@@ -191,7 +192,8 @@ async function main() {
       if (!targetRepoUrl) {
         throw new Error(`Repository at ${targetDir} not found and TARGET_REPO_URL is not set; cannot ${forkFromCheckpoint ? "fork" : "rewind"}`);
       }
-      run(`git clone --branch ${targetBranch} --single-branch ${targetRepoUrl} "${targetDir}"`, workDir, "inherit");
+      const cloneBranch = forkFromCheckpoint ? forkSourceBranch : targetBranch;
+      run(`rm -rf "${targetDir}" && git clone --branch ${cloneBranch} --single-branch ${targetRepoUrl} "${targetDir}"`, workDir, "inherit");
       run(`git config user.name "Daybreak Bot" && git config user.email "daybreak@example.com"`, targetDir, "inherit");
     }
     run(

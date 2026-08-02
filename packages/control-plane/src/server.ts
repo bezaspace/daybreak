@@ -493,6 +493,7 @@ async function spawnFork(
     COMPACTION_RESERVE_TOKENS: String(config.compactionReserveTokens),
     COMPACTION_KEEP_RECENT_TOKENS: String(config.compactionKeepRecentTokens),
     TASK_PROMPT: prompt,
+    FORK_SOURCE_BRANCH: parent.prBranch,
   };
 
   const sandboxArgs = [

@@ -10,3 +10,5 @@ dist/
 .turbo/
 .vscode/
 .idea/
+.daybreak/
+supabase/.temp/
