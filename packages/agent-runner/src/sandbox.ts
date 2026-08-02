@@ -241,6 +241,13 @@ async function main() {
     } catch {
       // ignore cleanup errors
     }
+  } finally {
+    try {
+      await publisher.close();
+    } catch {
+      // ignore publisher cleanup errors
+    }
+    process.exit(process.exitCode ?? 0);
   }
 }
 

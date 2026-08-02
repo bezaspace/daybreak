@@ -198,18 +198,33 @@ async function main() {
       provider: result.provider,
     });
 
+    if (result.success && pushAfterFix) {
+      try {
+        const currentBranch = run(`cd "${targetDir}" && git branch --show-current`, ".", "pipe").toString().trim();
+        if (currentBranch && currentBranch !== prBranch) {
+          console.log(pc.bold(`[run-task] renaming current branch ${currentBranch} -> ${prBranch}`));
+          run(`cd "${targetDir}" && git branch -m ${prBranch}`, ".", "inherit");
+        }
+        console.log(pc.bold(`[run-task] pushing ${prBranch} to origin`));
+        run(`cd "${targetDir}" && git push -u origin ${prBranch}`, ".", "inherit");
+        publisher.publish("commit_pushed", { prBranch });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(pc.red("[run-task] push failed:"), message);
+        publisher.publish("task_failed", { error: message });
+        process.exitCode = 1;
+      }
+    }
+
     if (process.env.REVIEW_MODE === "true") {
       publisher.publish(result.success ? "review_complete" : "review_failed", {
         success: result.success,
         summary: result.summary,
         error: result.error,
       });
-      if (result.success) {
-        publisher.publish("commit_pushed", { prBranch });
-      }
     }
 
-    process.exitCode = result.success ? 0 : 1;
+    process.exitCode = process.exitCode ?? (result.success ? 0 : 1);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(pc.red("[run-task] error:"), errorMessage);

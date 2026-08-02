@@ -184,10 +184,10 @@ function stripMention(text: string): string {
   return text.replace(/(^|\s)@daybreak-bot(\b|$)/gi, " ").replace(/\s{2,}/g, " ").trim();
 }
 
-function buildIssuePrompt(repoUrl: string, branch: string, issue: unknown, commentBody: string): string {
+function buildIssuePrompt(repoUrl: string, branch: string, prBranch: string, issue: unknown, commentBody: string): string {
   const issueTitle = (issue && typeof issue === "object" && "title" in issue && typeof issue.title === "string") ? issue.title : "No title";
   const issueBody = (issue && typeof issue === "object" && "body" in issue && typeof issue.body === "string") ? `\n\nBody:\n${issue.body}` : "";
-  return `A GitHub issue was opened in ${repoUrl} (branch: ${branch}):\n\nTitle: ${issueTitle}${issueBody}\n\nA user then commented:\n${commentBody}\n\nPlease investigate the issue, make the minimal fix, run the tests until they pass, then commit the fix and open a pull request.`;
+  return `A GitHub issue was opened in ${repoUrl} (base branch: ${branch}). The checked-out feature branch is "${prBranch}".\n\nTitle: ${issueTitle}${issueBody}\n\nA user then commented:\n${commentBody}\n\nPlease investigate the issue, make the minimal fix, run the tests until they pass, then stage and commit the fix on the "${prBranch}" branch. Do NOT create a new branch, switch branches, run git push, or open a pull request; the control plane will push "${prBranch}" and open the PR.`;
 }
 
 function buildReviewPrompt(repoUrl: string, prNumber: number, baseBranch: string, headBranch: string, body: string): string {
@@ -274,15 +274,19 @@ async function spawnTask(spec: { repo: string; branch: string; prBranch?: string
       const raw = await redis.lrange(`daybreak:stream:${task.id}`, 0, -1);
       const events = raw.map((item) => (typeof item === "string" ? (JSON.parse(item) as StreamEvent) : (item as StreamEvent)));
 
-      const created = events.find((e) => e.type === "sandbox_created" || e.type === "sandbox_keep_alive");
+      const created = events.find((e) => e.type === "sandbox_created");
       if (created?.data && typeof created.data === "object") {
         const d = created.data as Record<string, unknown>;
         const sandboxId = typeof d.sandboxId === "string" ? d.sandboxId : undefined;
+        if (sandboxId) task.sandboxId = sandboxId;
+      }
+      const keepAlive = events.find((e) => e.type === "sandbox_keep_alive");
+      if (keepAlive?.data && typeof keepAlive.data === "object") {
+        const d = keepAlive.data as Record<string, unknown>;
+        const sandboxId = typeof d.sandboxId === "string" ? d.sandboxId : undefined;
         const keepAliveUntil = typeof d.keepAliveUntil === "number" ? d.keepAliveUntil : undefined;
-        if (sandboxId) {
-          task.sandboxId = sandboxId;
-          task.keepAliveUntil = keepAliveUntil;
-        }
+        if (sandboxId) task.sandboxId = sandboxId;
+        if (keepAliveUntil) task.keepAliveUntil = keepAliveUntil;
       }
 
       const final = events.find((e) => e.type === "task_complete" || e.type === "task_failed");
@@ -648,8 +652,9 @@ app.post(
         const defaultBranch = typeof repository?.default_branch === "string" ? repository.default_branch : "main";
         const issueTitle = typeof issue.title === "string" ? issue.title : "";
         const issueBody = typeof issue.body === "string" ? issue.body : "";
-        const prompt = buildIssuePrompt(repoUrl, defaultBranch, { title: issueTitle, body: issueBody }, stripMention(commentBody));
-        const task = await spawnTask({ repo: repoUrl, branch: defaultBranch, prompt, triggerSource: "issue_comment", githubSender: typeof sender === "string" ? sender : undefined });
+        const issuePrBranch = `daybreak/${randomUUID()}`;
+        const prompt = buildIssuePrompt(repoUrl, defaultBranch, issuePrBranch, { title: issueTitle, body: issueBody }, stripMention(commentBody));
+        const task = await spawnTask({ repo: repoUrl, branch: defaultBranch, prBranch: issuePrBranch, prompt, triggerSource: "issue_comment", githubSender: typeof sender === "string" ? sender : undefined });
         return c.json({ taskId: task.id, repo: repoFullName, branch: defaultBranch, status: task.status }, 202);
       }
       case "pull_request_review_comment": {

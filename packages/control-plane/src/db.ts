@@ -86,9 +86,14 @@ export interface StreamEvent {
 function getSupabase(): SupabaseClient | undefined {
   const config = loadConfig();
   if (!config.supabaseUrl || !config.supabaseServiceKey) return undefined;
-  return createClient(config.supabaseUrl, config.supabaseServiceKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+  try {
+    return createClient(config.supabaseUrl, config.supabaseServiceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+  } catch (error) {
+    console.warn("[db] Supabase client creation failed, running without persistence:", error instanceof Error ? error.message : String(error));
+    return undefined;
+  }
 }
 
 function toTask(row: PersistedTask): Task {
