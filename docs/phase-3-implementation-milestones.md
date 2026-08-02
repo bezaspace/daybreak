@@ -48,12 +48,12 @@
 
 **What it ships:** Webhook-triggered tasks use the existing PAT path and the control plane creates tasks with the right repo/branch/prompt.
 
-- Verify the configured `GITHUB_TOKEN` has the required permissions on the target repo (e.g. `GET /repos/{owner}/{repo}` and check `permissions.contents` / `permissions.pull_requests`). Fail fast with a clear error if not.
-- Strip the `@daybreak-bot` mention and build the agent prompt.
-- For an issue: base branch is `repository.default_branch`; prompt includes issue title/body.
-- For a review comment: existing PR branch is `pull_request.head.ref`; prompt includes the review comment and optional PR context.
-- Extend `POST /api/tasks` to also accept `triggerSource`, `prNumber`, and `githubSender` so webhooks can reuse the same task-creation path.
-- Add per-repo and per-sender task-rate limits (count tasks in the last hour). Return `429` when exceeded.
+- [x] Verify the configured `GITHUB_TOKEN` has the required permissions on the target repo (e.g. `GET /repos/{owner}/{repo}` and check `permissions.contents` / `permissions.pull_requests`). Fail fast with a clear error if not.
+- [x] Strip the `@daybreak-bot` mention and build the agent prompt.
+- [x] For an issue: base branch is `repository.default_branch`; prompt includes issue title/body.
+- [x] For a review comment: existing PR branch is `pull_request.head.ref`; prompt includes the review comment and optional PR context.
+- [x] Webhook handlers and `POST /api/tasks` call a shared guard that validates PAT permissions and per-repo/per-sender rate limits before spawning.
+- [x] Add per-repo and per-sender task-rate limits (count tasks in the last hour). Return `429` when exceeded.
 
 **Acceptance:**
 - `pnpm lint && pnpm typecheck && pnpm test` pass.

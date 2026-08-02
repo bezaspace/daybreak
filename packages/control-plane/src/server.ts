@@ -205,6 +205,7 @@ async function isDuplicateDelivery(deliveryId: string): Promise<boolean> {
 }
 
 async function spawnTask(spec: { repo: string; branch: string; prBranch?: string; prompt?: string; triggerSource?: string; githubSender?: string; prNumber?: number; maxTurns?: number; maxCostUsd?: number; maxWallClockMinutes?: number }): Promise<Task> {
+  await assertCanSpawn(spec.repo, spec.githubSender);
   const task = taskFrom({ ...spec, status: "running" });
   tasks.set(task.id, task);
   await persistTask(task);
@@ -323,6 +324,73 @@ async function createPendingTask(spec: { repo: string; branch: string; prBranch:
   return task;
 }
 
+class TaskRejectedError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+async function validatePat(repoUrl: string, token: string): Promise<{ ok: boolean; missing?: string[]; error?: string }> {
+  const parsed = parseRepo(repoUrl);
+  if (!parsed) return { ok: false, error: "invalid repo URL" };
+  try {
+    const res = await fetch(`https://api.github.com/repos/${parsed.owner}/${parsed.repo}`, {
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${token}`,
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "unknown");
+      return { ok: false, error: `GitHub API returned ${res.status}: ${text}` };
+    }
+    const data = (await res.json()) as { permissions?: Record<string, unknown> };
+    const perms = data.permissions || {};
+    const contentsOk = perms.push === true || perms.admin === true || perms.contents === true || perms.contents === "write";
+    const prsOk = perms.push === true || perms.admin === true || perms.pull_requests === true || perms.pull_requests === "write";
+    if (contentsOk && prsOk) return { ok: true };
+    const missing: string[] = [];
+    if (!contentsOk) missing.push("contents:write");
+    if (!prsOk) missing.push("pull_requests:write");
+    return { ok: false, missing };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+async function isRateLimited(repo: string, sender: string | undefined): Promise<boolean> {
+  const limit = config.githubWebhookRateLimit ?? 10;
+  const windowMs = 60 * 60 * 1000;
+  const cutoff = Date.now() - windowMs;
+  const all = await getTasks();
+  let repoCount = 0;
+  let senderCount = 0;
+  for (const t of all) {
+    if (t.startedAt >= cutoff) {
+      if (t.repo === repo) repoCount++;
+      if (sender && t.githubSender === sender) senderCount++;
+    }
+    if (repoCount >= limit || senderCount >= limit) return true;
+  }
+  return false;
+}
+
+async function assertCanSpawn(repo: string, sender: string | undefined): Promise<void> {
+  if (await isRateLimited(repo, sender)) {
+    throw new TaskRejectedError("rate limit exceeded for repo or sender", 429);
+  }
+  if (!config.githubToken) {
+    throw new TaskRejectedError("GITHUB_TOKEN not configured", 500);
+  }
+  const validation = await validatePat(repo, config.githubToken);
+  if (!validation.ok) {
+    throw new TaskRejectedError(validation.error || `missing PAT permissions: ${validation.missing?.join(", ") || "unknown"}`, 403);
+  }
+}
+
 async function findOriginalTask(repo: string, prNumber: number, prBranch: string): Promise<Task | undefined> {
   const memory = Array.from(tasks.values()).find((t) => t.repo === repo && (t.prNumber === prNumber || t.prBranch === prBranch));
   if (memory) return memory;
@@ -354,6 +422,7 @@ function buildSpawnEnv(taskId: string, prBranch: string, repo: string, branch: s
 }
 
 async function runReview(spec: { repo: string; baseBranch: string; headBranch: string; prNumber: number; prompt: string; githubSender?: string }): Promise<Task> {
+  await assertCanSpawn(spec.repo, spec.githubSender);
   const repoUrl = spec.repo;
   const baseRef = spec.baseBranch;
   const headRef = spec.headBranch;
@@ -486,25 +555,33 @@ app.post("/api/tasks", async (c) => {
     return c.json({ error: "repo is required" }, 400);
   }
 
-  const task = await spawnTask({
-    repo,
-    branch,
-    prompt,
-    triggerSource: "dashboard",
-    maxTurns: body.maxTurns,
-    maxCostUsd: body.maxCostUsd,
-    maxWallClockMinutes: body.maxWallClockMinutes,
-  });
-  return c.json({ taskId: task.id, repo, branch, status: task.status });
+  try {
+    const task = await spawnTask({
+      repo,
+      branch,
+      prompt,
+      triggerSource: "dashboard",
+      maxTurns: body.maxTurns,
+      maxCostUsd: body.maxCostUsd,
+      maxWallClockMinutes: body.maxWallClockMinutes,
+    });
+    return c.json({ taskId: task.id, repo, branch, status: task.status });
+  } catch (error) {
+    if (error instanceof TaskRejectedError) {
+      return c.json({ error: error.message }, error.status as 403 | 429 | 500);
+    }
+    throw error;
+  }
 });
 
 app.post(
   "/api/webhooks/github",
   bodyLimit({ maxSize: 1 * 1024 * 1024, onError: (c) => c.json({ error: "payload too large" }, 413) }),
   async (c) => {
-    const signature = c.req.header("x-hub-signature-256") || "";
-    const event = c.req.header("x-github-event") || "";
-    const deliveryId = c.req.header("x-github-delivery") || "";
+    try {
+      const signature = c.req.header("x-hub-signature-256") || "";
+      const event = c.req.header("x-github-event") || "";
+      const deliveryId = c.req.header("x-github-delivery") || "";
 
     if (!config.githubWebhookSecret) {
       return c.json({ error: "webhook secret not configured" }, 500);
@@ -622,6 +699,12 @@ app.post(
         return c.json({ ok: true, note: `unhandled event: ${event}` }, 200);
       }
     }
+  } catch (error) {
+    if (error instanceof TaskRejectedError) {
+      return c.json({ ok: false, error: error.message }, error.status as 403 | 429 | 500);
+    }
+    throw error;
+  }
   },
 );
 

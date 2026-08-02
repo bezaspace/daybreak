@@ -25,6 +25,7 @@ export interface DaybreakConfig {
   githubAppId?: string;
   githubWebhookSecret?: string;
   githubWebhookRepoAllowlist?: string;
+  githubWebhookRateLimit?: number;
   reviewKeepAliveMs?: number;
   upstashRedisRestUrl?: string;
   upstashRedisToken?: string;
@@ -146,6 +147,7 @@ export function loadConfig(envPath?: string): DaybreakConfig {
     githubAppId: get("GITHUB_APP_ID"),
     githubWebhookSecret: get("GITHUB_WEBHOOK_SECRET"),
     githubWebhookRepoAllowlist: get("GITHUB_WEBHOOK_REPO_ALLOWLIST"),
+    githubWebhookRateLimit: parseIntEnv("GITHUB_WEBHOOK_RATE_LIMIT", 10),
     reviewKeepAliveMs: parseIntEnv("REVIEW_KEEP_ALIVE_MS", 15 * 60 * 1000),
     upstashRedisRestUrl: get("UPSTASH_REDIS_REST_URL"),
     upstashRedisToken: get("UPSTASH_REDIS_TOKEN"),
