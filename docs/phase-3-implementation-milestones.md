@@ -116,14 +116,14 @@
 
 **What it ships:** Phase 3 is documented, tested, and marked complete.
 
-- Add unit tests for webhook signature verification and payload parsing.
-- Add an integration test that POSTs a synthetic `issue_comment` payload to the control plane and asserts a task is created.
-- Update `docs/SECRETS.md` with PAT requirements, webhook secret, repo allowlist, and `cloudflared` tunnel instructions.
-- Update `docs/COST_BUDGET.md` with the cost impact of E2B keep-alive.
-- Update `.env.example` with Phase 3 variables.
-- Update `roadmap.md` Phase 3 checklist to reflect the PAT-only path.
-- Update `decisions.md` with the PAT-only decision and deferred GitHub App work.
-- Run `pnpm lint && pnpm typecheck && pnpm test && pnpm --filter ui build`.
+- [x] Add unit tests for webhook signature verification and payload parsing.
+- [x] Add an integration test that POSTs a synthetic `issue_comment` payload to the control plane and asserts a task is created.
+- [x] Update `docs/SECRETS.md` with PAT requirements, webhook secret, repo allowlist, `GITHUB_WEBHOOK_RATE_LIMIT`, and `cloudflared` tunnel instructions.
+- [x] Update `docs/COST_BUDGET.md` with the cost impact of E2B keep-alive.
+- [x] Update `.env.example` with Phase 3 variables.
+- [x] Update `roadmap.md` Phase 3 checklist to reflect the PAT-only path.
+- [x] Update `decisions.md` with the PAT-only decision and deferred GitHub App work.
+- [x] Run `pnpm lint && pnpm typecheck && pnpm test && pnpm --filter ui build`.
 
 **Acceptance:**
 - All CI checks pass.

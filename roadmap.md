@@ -131,17 +131,17 @@ Progress is measured by the completion of demoable vertical slices and objective
 
 **Goal:** Daybreak is triggerable from a GitHub Issue or a PR review comment via repo webhooks, uses a PAT for API and git access, and listens for reviewer comments to iterate.
 
-- [ ] 6.1. **Repo webhooks and local tunneling:** Document and configure repo/org webhooks pointing at the local control plane (via `cloudflared` or `ngrok`). Subscribe to `issue_comment`, `pull_request_review_comment`, `pull_request_review`, `check_run`.
-- [ ] 6.2. **Webhook handler:** In the control plane. Verify `X-Hub-Signature-256`, validate the repo against an allowlist, parse the event, and create a task.
-- [ ] 6.3. **PAT-based auth path:** Use `GITHUB_TOKEN` (PAT with `contents:write` and `pull_requests:write`) for PR creation and git push inside the sandbox. Validate token permissions on the target repo before running.
-- [ ] 6.4. **Issue/PR-comment parsing:** Extract the instruction, target repo/branch, and context; strip the `@daybreak-bot` mention; map to a task spec.
-- [ ] 6.5. **Review-loop listener:** On a new `pull_request_review_comment` with `@daybreak-bot`, wake the sandbox (or create a fresh one) and push a follow-up commit to the existing PR branch.
-- [ ] 6.6. **Multi-tenancy stub (PAT version):** In Supabase, map repo/sender to a workspace and enforce per-repo/per-sender task-rate limits. Per-installation limits are deferred.
-- [ ] 6.7. ~~Generate the GitHub App private key; store as a Cloudflare/Worker secret; implement JWT signing + installation-token exchange.~~ *Deferred to Phase 7.*
-- [ ] 6.8. ~~Replace the MVP PAT path with installation tokens everywhere.~~ *Deferred to Phase 7.*
-- [ ] 6.9. **Comment-trigger routing:** Distinguish "new task" (issue) vs. "iterate on existing PR" (review comment).
-- [ ] 6.10. **Sandbox standby/keep-alive:** A PR-opened task keeps its sandbox alive (idle/paused) for a configurable window to absorb review feedback, subject to cost/turn caps.
-- [ ] 6.11. **Exit criteria:** Comment `@daybreak-bot fix the flaky test` on an issue → Daybreak opens a PR. A reviewer comments `@daybreak-bot also handle the null case` → Daybreak pushes a follow-up commit to the same PR. All token/cost guardrails remain active.
+- [x] 6.1. **Repo webhooks and local tunneling:** Document and configure repo/org webhooks pointing at the local control plane (via `cloudflared` or `ngrok`). Subscribe to `issue_comment`, `pull_request_review_comment`, `pull_request_review`, `check_run`.
+- [x] 6.2. **Webhook handler:** In the control plane. Verify `X-Hub-Signature-256`, validate the repo against an allowlist, parse the event, and create a task.
+- [x] 6.3. **PAT-based auth path:** Use `GITHUB_TOKEN` (PAT with `contents:write` and `pull_requests:write`) for PR creation and git push inside the sandbox. Validate token permissions on the target repo before running.
+- [x] 6.4. **Issue/PR-comment parsing:** Extract the instruction, target repo/branch, and context; strip the `@daybreak-bot` mention; map to a task spec.
+- [x] 6.5. **Review-loop listener:** On a new `pull_request_review_comment` with `@daybreak-bot`, wake the sandbox (or create a fresh one) and push a follow-up commit to the existing PR branch.
+- [x] 6.6. **Multi-tenancy stub (PAT version):** In Supabase, map repo/sender to a workspace and enforce per-repo/per-sender task-rate limits. Per-installation limits are deferred.
+- [x] 6.7. ~~Generate the GitHub App private key; store as a Cloudflare/Worker secret; implement JWT signing + installation-token exchange.~~ *Deferred to Phase 7.*
+- [x] 6.8. ~~Replace the MVP PAT path with installation tokens everywhere.~~ *Deferred to Phase 7.*
+- [x] 6.9. **Comment-trigger routing:** Distinguish "new task" (issue) vs. "iterate on existing PR" (review comment).
+- [x] 6.10. **Sandbox standby/keep-alive:** A PR-opened task keeps its sandbox alive (idle/paused) for a configurable window to absorb review feedback, subject to cost/turn caps.
+- [x] 6.11. **Exit criteria:** Comment `@daybreak-bot fix the flaky test` on an issue → Daybreak opens a PR. A reviewer comments `@daybreak-bot also handle the null case` → Daybreak pushes a follow-up commit to the same PR. All token/cost guardrails remain active.
 
 ---
 

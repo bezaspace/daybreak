@@ -48,6 +48,11 @@ Free providers are used wherever possible. For paid fallbacks, the target model 
 - The `daybreak-browser` template uses 2 vCPU / 1536 MB RAM, which is within the free-tier allowance and is required for Chromium's V8 renderer to avoid OOM.
 - Time-travel snapshots are the main wildcard: a full filesystem snapshot per turn is expensive, so Phase 4 should benchmark snapshot size and latency before enabling per-turn snapshots.
 
+#### Sandbox keep-alive (Phase 3 review loop)
+- When an issue-comment task opens a PR, the sandbox stays alive for `REVIEW_KEEP_ALIVE_MS` (default 15 minutes) so a later `pull_request_review_comment` can reconnect to the same sandbox instead of paying for a cold start.
+- Hobby-tier sandboxes have a maximum lifetime of 1 hour, so `REVIEW_KEEP_ALIVE_MS` is capped below that. The default 15 minutes balances responsiveness with cost.
+- A kept-alive sandbox consumes vCPU/RAM for the entire keep-alive window. At 2 vCPU / 1536 MB RAM, 15 minutes ≈ 0.5 vCPU-hours + 1.5 GB-hours per review cycle. Keep the window short and close the sandbox promptly if no review arrives.
+
 ### Supabase
 - The control plane inserts one `tasks` row per task and one `events` row per stream event (~300–500 events for a short fix run).
 - At ~400 events per task, 1,000 tasks/month = ~400K rows and ~200–400 MB depending on payload size, so the 500MB DB cap is the binding constraint before the 500K Edge Function limit.

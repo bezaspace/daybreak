@@ -805,5 +805,9 @@ app.get("/api/tasks/:id/logs", async (c) => {
 });
 
 const port = Number(process.env.PORT || "8787");
-console.log(`[control-plane] starting on http://localhost:${port}`);
-serve({ fetch: app.fetch, port });
+if (process.env.NODE_ENV !== "test") {
+  console.log(`[control-plane] starting on http://localhost:${port}`);
+  serve({ fetch: app.fetch, port });
+}
+
+export { app };
