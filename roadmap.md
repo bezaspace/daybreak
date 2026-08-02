@@ -111,12 +111,12 @@ Progress is measured by the completion of demoable vertical slices and objective
 
 **Goal:** Every prompt, token count, tool call, and latency is emitted as OpenTelemetry spans to Langfuse, the dashboard renders the reasoning tree, and the system survives primary LLM provider outages.
 
-- [ ] 5.1. **OTel instrumentation:** In the agent runner. A root `task` span with child spans per LLM call (model, prompt/completion token counts, latency) and per tool call (tool name, args, result size, latency).
-- [ ] 5.2. **Langfuse ingestion:** Spans exported via the OTel HTTP exporter to the Langfuse OTel endpoint.
+- [x] 5.1. **OTel instrumentation:** In the agent runner. A root `task` span with child spans per LLM call (model, prompt/completion token counts, latency) and per tool call (tool name, args, result size, latency).
+- [x] 5.2. **Langfuse ingestion:** Spans exported via the OTel HTTP exporter to the Langfuse OTel endpoint.
 - [ ] 5.3. **DAG trace visualizer:** In the UI. Query Langfuse API for a task's trace; render reasoning tree with per-node cost and latency; color-code tool types; surface token totals.
 - [ ] 5.4. **Cost dashboard:** Aggregate $-spend per task, per provider, per day, sourced from span token counts × provider pricing.
-- [ ] 5.5. Map the Phase 1 event schema 1:1 to OTel span attributes.
-- [ ] 5.6. Wrap Pi SDK's LLM-call and tool-execution hooks with span start/end.
+- [x] 5.5. Map the Phase 1 event schema 1:1 to OTel span attributes.
+- [x] 5.6. Wrap Pi SDK's LLM-call and tool-execution hooks with span start/end.
 - [ ] 5.7. **Provider fallback:** When the primary `LLM_BASE_URL` returns 429/5xx or a configurable retry budget is exhausted, switch to `LLM_FALLBACK_*`. Record provider usage in traces.
 - [ ] 5.8. Build the Langfuse query client for the visualizer.
 - [ ] 5.9. Render the DAG with React Flow or D3; make nodes clickable to show full prompt/response.

@@ -20,19 +20,19 @@ This document breaks the Phase 2 exit criteria into small, independently-demoabl
 
 **What it ships:** The agent runner emits a real OpenTelemetry trace for every task, with spans for turns, LLM calls, and tool calls, exported to Langfuse.
 
-- [ ] Add an `instrumentation.ts` in `packages/agent-runner` that initializes the OpenTelemetry `NodeSDK`.
-  - Use `LangfuseSpanProcessor` from `@langfuse/otel` or a direct `OTLPTraceExporter` to `https://cloud.langfuse.com/api/public/otel/v1/traces`.
-  - Derive trace ID from `TASK_ID` so the UI can later correlate.
-- [ ] Instrument `TaskRunner` in `packages/agent-runner/src/session.ts`.
-  - Root span: `task` (name from task/prompt).
+- [x] Add `packages/agent-runner/src/telemetry.ts` that initializes an OpenTelemetry `TracerProvider`.
+  - Use a direct `OTLPTraceExporter` to `${LANGFUSE_BASE_URL}/api/public/otel/v1/traces` with Basic Auth and `x-langfuse-ingestion-version: 4`.
+  - Derive the trace ID from `TASK_ID` so the UI can later correlate.
+- [x] Instrument `TaskRunner` in `packages/agent-runner/src/session.ts`.
+  - Root span: `task`.
   - Child spans:
     - `turn` per `turn_start`/`agent_end`.
     - `llm` per `message_end`, capturing model, prompt/completion tokens, latency, and cost.
     - `tool` per `tool_execution_start`/`tool_execution_end`, capturing tool name, arg summary, result size, latency, and error status.
     - `compaction` on `compaction_start`/`compaction_end`.
-- [ ] Pass `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and `LANGFUSE_BASE_URL` through `sandbox.ts` envs.
-- [ ] Flush and shutdown the OTel SDK before the sandbox exits. Wrap `run-task.ts` `finally` to call `otelSDK.shutdown()` / `langfuseSpanProcessor.forceFlush()` before `closeBrowser()` and `publisher.close()`.
-- [ ] Make `MetricsCollector` augment spans with the same usage data it already tracks.
+- [x] Pass `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and `LANGFUSE_BASE_URL` through `sandbox.ts` envs and `control-plane/src/server.ts` spawn env.
+- [x] Flush and shutdown the OTel SDK before the sandbox exits. `TaskRunner.shutdown()` calls `provider.shutdown()`; `run-task.ts`, `spike.ts`, and `evals/src/index.ts` call `runner.shutdown()`.
+- [x] Set `gen_ai.*` attributes on the `llm` span so Langfuse renders it as a generation with token usage and cost.
 
 **Acceptance:**
 - `pnpm --filter agent-runner spike` (or an E2E run) produces a trace in Langfuse.

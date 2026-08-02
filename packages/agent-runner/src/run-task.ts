@@ -4,7 +4,6 @@ import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { execSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import pc from "picocolors";
-import { closeBrowser } from "./browser-tool.js";
 import { TaskRunner } from "./session.js";
 import { createStreamPublisher } from "./stream.js";
 
@@ -148,6 +147,7 @@ async function main() {
       cwd: targetDir,
       systemPrompt,
       autoApprove,
+      taskId,
       onEvent: (event) => {
         publisher.publish(event.type, toStreamData(event));
         if (event.type === "tool_execution_update" && event.toolName === "browser") {
@@ -174,16 +174,17 @@ async function main() {
       summary: result.summary,
       metrics: result.metrics,
       error: result.error,
+      traceId: result.traceId,
     });
 
     process.exitCode = result.success ? 0 : 1;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(pc.red("[run-task] error:"), errorMessage);
-    publisher.publish("task_failed", { error: errorMessage });
+    publisher.publish("task_failed", { error: errorMessage, traceId: runner.getTraceId() });
     process.exitCode = 1;
   } finally {
-    await closeBrowser();
+    await runner.shutdown();
     await publisher.close();
   }
 }

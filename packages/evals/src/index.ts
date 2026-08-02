@@ -43,21 +43,27 @@ async function main() {
   for (const evalCase of fixtures) {
     console.log(pc.bold(`--- ${evalCase.name} ---`));
     const runner = new TaskRunner(config);
-    const result = await runner.run({
-      prompt: evalCase.prompt,
-      cwd: evalCase.fixture,
-      autoApprove: true,
-      systemPrompt:
-        "You are Daybreak, an autonomous coding agent. Investigate, fix, and verify the repository with minimal changes.",
-    });
 
-    console.log("Success:", result.success);
-    console.log("Metrics:", JSON.stringify(result.metrics, null, 2));
-    if (result.error) console.log(pc.red("Error:"), result.error);
-    console.log();
+    try {
+      const result = await runner.run({
+        prompt: evalCase.prompt,
+        cwd: evalCase.fixture,
+        autoApprove: true,
+        systemPrompt:
+          "You are Daybreak, an autonomous coding agent. Investigate, fix, and verify the repository with minimal changes.",
+      });
 
-    if (result.success) passed++;
-    else failed++;
+      console.log("Success:", result.success);
+      console.log("Trace ID:", result.traceId);
+      console.log("Metrics:", JSON.stringify(result.metrics, null, 2));
+      if (result.error) console.log(pc.red("Error:"), result.error);
+      console.log();
+
+      if (result.success) passed++;
+      else failed++;
+    } finally {
+      await runner.shutdown();
+    }
   }
 
   console.log(pc.bold("=== Eval summary ==="));

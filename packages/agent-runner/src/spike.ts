@@ -16,20 +16,25 @@ async function main() {
   const config = loadConfig(resolve(__dirname, "../../.env"));
   const runner = new TaskRunner(config);
 
-  const result = await runner.run({
-    prompt,
-    cwd: fixture,
-    systemPrompt:
-      "You are Daybreak, an autonomous coding agent. Use the available tools to investigate and fix the repository. Be concise. Report the final fix.",
-  });
+  try {
+    const result = await runner.run({
+      prompt,
+      cwd: fixture,
+      systemPrompt:
+        "You are Daybreak, an autonomous coding agent. Use the available tools to investigate and fix the repository. Be concise. Report the final fix.",
+    });
 
-  console.log(pc.bold("\n=== Task result ==="));
-  console.log("Success:", result.success);
-  console.log("Summary:", result.summary);
-  console.log("Metrics:", JSON.stringify(result.metrics, null, 2));
-  if (result.error) console.log(pc.red("Error:"), result.error);
+    console.log(pc.bold("\n=== Task result ==="));
+    console.log("Success:", result.success);
+    console.log("Summary:", result.summary);
+    console.log("Trace ID:", result.traceId);
+    console.log("Metrics:", JSON.stringify(result.metrics, null, 2));
+    if (result.error) console.log(pc.red("Error:"), result.error);
 
-  process.exit(result.success ? 0 : 1);
+    process.exitCode = result.success ? 0 : 1;
+  } finally {
+    await runner.shutdown();
+  }
 }
 
 main().catch((error) => {

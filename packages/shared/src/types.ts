@@ -28,6 +28,7 @@ export interface TaskResult {
   summary: string;
   metrics: TaskMetrics;
   error?: string;
+  traceId?: string;
 }
 
 export interface AgentConfig {
