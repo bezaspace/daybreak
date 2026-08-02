@@ -56,6 +56,50 @@ export class SessionStore {
     return { sessionRef, localPath: targetPath, snapshotId };
   }
 
+  /**
+   * Resolve a sessionRef back into a local JSONL file path that can be opened by
+   * `SessionManager.open`. The path is copied into `sessionDir` so the restored
+   * session can be mutated without corrupting the original snapshot.
+   */
+  async restore(sessionRef: string, sessionDir: string): Promise<string> {
+    mkdirSync(sessionDir, { recursive: true });
+    const targetPath = join(sessionDir, "restored.jsonl");
+
+    if (sessionRef.startsWith("local:")) {
+      const sourcePath = sessionRef.slice("local:".length);
+      copyFileSync(sourcePath, targetPath);
+      return targetPath;
+    }
+
+    if (sessionRef.startsWith("snapshot:")) {
+      const snapshotId = sessionRef.slice("snapshot:".length);
+      const jsonl = await this.downloadSnapshot(snapshotId);
+      writeFileSync(targetPath, jsonl);
+      return targetPath;
+    }
+
+    throw new Error(`Unsupported sessionRef: ${sessionRef}`);
+  }
+
+  private async downloadSnapshot(snapshotId: string): Promise<string> {
+    const { supabaseUrl, supabaseServiceKey } = this.options;
+    if (!supabaseUrl || !supabaseServiceKey) {
+      throw new Error("Supabase credentials are required to restore snapshot sessions");
+    }
+    const response = await fetch(`${supabaseUrl}/rest/v1/session_snapshots?id=eq.${snapshotId}`, {
+      headers: {
+        apikey: supabaseServiceKey,
+        Authorization: `Bearer ${supabaseServiceKey}`,
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to download snapshot: ${response.status}`);
+    }
+    const rows = (await response.json()) as Array<{ jsonl: string }>;
+    if (!rows[0]) throw new Error(`Snapshot ${snapshotId} not found`);
+    return rows[0].jsonl;
+  }
+
   private async uploadSnapshot(turn: number, jsonl: string): Promise<string | undefined> {
     const { supabaseUrl, supabaseServiceKey } = this.options;
     if (!supabaseUrl || !supabaseServiceKey) return undefined;

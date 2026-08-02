@@ -129,6 +129,7 @@ async function publishEvent(taskId: string, type: string, data: unknown) {
 }
 
 const tasks = new Map<string, Task>();
+const rewindingTasks = new Set<string>();
 
 function taskFrom(body: { repo: string; branch: string; id?: string; prBranch?: string; triggerSource?: string; githubSender?: string; prNumber?: number; prompt?: string; status?: Task["status"]; workspaceId?: string }): Task {
   const id = body.id ?? randomUUID();
@@ -269,6 +270,10 @@ async function spawnTask(spec: { repo: string; branch: string; prBranch?: string
   child.unref();
 
   child.on("exit", async (code) => {
+    if (rewindingTasks.has(task.id)) {
+      console.log(`[control-plane] spawn exit for ${task.id} ignored because a rewind is in progress`);
+      return;
+    }
     await syncEventsFromRedis(task.id);
 
     try {
@@ -322,6 +327,104 @@ async function spawnTask(spec: { repo: string; branch: string; prBranch?: string
   });
 
   return task;
+}
+
+async function spawnRewind(parent: Task, sandboxId: string, checkpointId: string, prompt: string): Promise<Task> {
+  rewindingTasks.add(parent.id);
+  parent.status = "running";
+  parent.endedAt = undefined;
+  await updateTask(parent.id, { status: "running", endedAt: undefined });
+  await publishEvent(parent.id, "task_rewind", { checkpointId, prompt });
+
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    E2B_TEMPLATE: config.e2bTemplate || "base",
+    TASK_ID: parent.id,
+    PR_BRANCH_NAME: parent.prBranch,
+    UPSTASH_REDIS_REST_URL: config.upstashRedisRestUrl || process.env.UPSTASH_REDIS_REST_URL || "",
+    UPSTASH_REDIS_TOKEN: config.upstashRedisToken || process.env.UPSTASH_REDIS_TOKEN || "",
+    LANGFUSE_PUBLIC_KEY: config.langfusePublicKey || process.env.LANGFUSE_PUBLIC_KEY || "",
+    LANGFUSE_SECRET_KEY: config.langfuseSecretKey || process.env.LANGFUSE_SECRET_KEY || "",
+    LANGFUSE_BASE_URL: config.langfuseBaseUrl || process.env.LANGFUSE_BASE_URL || "",
+    MAX_TURNS: String(config.maxTurns),
+    MAX_WALL_CLOCK_MINUTES: String(config.maxWallClockMinutes),
+    MAX_COST_USD: String(config.maxCostUsd),
+    COMPACTION_ENABLED: String(config.compactionEnabled),
+    COMPACTION_RESERVE_TOKENS: String(config.compactionReserveTokens),
+    COMPACTION_KEEP_RECENT_TOKENS: String(config.compactionKeepRecentTokens),
+    TASK_PROMPT: prompt,
+  };
+
+  const sandboxArgs = [
+    "--filter",
+    "agent-runner",
+    "sandbox",
+    `--repo=${parent.repo}`,
+    `--branch=${parent.branch}`,
+    `--pr-branch=${parent.prBranch}`,
+    `--task-id=${parent.id}`,
+    `--parent-task-id=${parent.id}`,
+    `--connect=${sandboxId}`,
+    `--rewind-to-checkpoint=${checkpointId}`,
+    `--prompt=${prompt}`,
+  ];
+
+  ensureLogDir();
+  const logPath = getLogPath(parent.id);
+  await appendFile(logPath, `[${new Date().toISOString()}] rewind ${parent.id} to ${checkpointId}\n`).catch(() => {});
+
+  const child = spawn("pnpm", sandboxArgs, { cwd: repoRoot, env, stdio: ["ignore", "pipe", "pipe"], detached: true });
+
+  function forwardLog(chunk: Buffer | string) {
+    const text = typeof chunk === "string" ? chunk : chunk.toString();
+    appendLog(parent.id, text).catch(() => {});
+  }
+
+  if (child.stdout) child.stdout.on("data", forwardLog);
+  if (child.stderr) child.stderr.on("data", forwardLog);
+
+  child.unref();
+
+  child.on("exit", async (code) => {
+    rewindingTasks.delete(parent.id);
+    await syncEventsFromRedis(parent.id);
+
+    try {
+      const redis = getRedis();
+      const raw = await redis.lrange(`daybreak:stream:${parent.id}`, 0, -1);
+      const events = raw.map((item) => (typeof item === "string" ? (JSON.parse(item) as StreamEvent) : (item as StreamEvent)));
+
+      const final = events.find((e) => e.type === "task_complete" || e.type === "task_failed");
+      if (final?.data && typeof final.data === "object") {
+        const d = final.data as Record<string, unknown>;
+        const metrics = d.metrics as { estimatedCostUsd?: number } | undefined;
+        parent.traceId = typeof d.traceId === "string" ? d.traceId : undefined;
+        parent.provider = typeof d.provider === "string" ? d.provider : undefined;
+        parent.costUsd = typeof metrics?.estimatedCostUsd === "number" ? metrics.estimatedCostUsd : undefined;
+      }
+    } catch (error) {
+      console.error(`[control-plane] failed to read final rewind event for ${parent.id}:`, error);
+    }
+
+    parent.endedAt = Date.now();
+    parent.exitCode = code ?? undefined;
+    parent.status = code === 0 ? "complete" : "failed";
+    tasks.set(parent.id, parent);
+    await updateTask(parent.id, parent);
+
+    if (parent.status === "complete" && config.githubToken) {
+      const pr = await createPullRequest(parent.repo, parent.prBranch, parent.branch, config.githubToken);
+      if (pr) {
+        parent.prUrl = pr.url;
+        parent.prNumber = pr.number;
+        tasks.set(parent.id, parent);
+        await updateTask(parent.id, { prUrl: pr.url, prNumber: pr.number });
+        await publishEvent(parent.id, "pr_created", { prUrl: pr.url, prNumber: pr.number, prBranch: parent.prBranch, baseBranch: parent.branch });
+      }
+    }
+  });
+
+  return parent;
 }
 
 async function createPendingTask(spec: { repo: string; branch: string; prBranch: string; prompt?: string; triggerSource: string; githubSender?: string; prNumber?: number }): Promise<Task> {
@@ -744,6 +847,34 @@ app.get("/api/checkpoints/:id", async (c) => {
   const checkpoint = await getCheckpoint(id);
   if (!checkpoint) return c.json({ error: "checkpoint not found" }, 404);
   return c.json(checkpoint);
+});
+
+app.post("/api/tasks/:id/rewind", async (c) => {
+  const id = c.req.param("id");
+  const body = await c.req.json().catch(() => ({}));
+  const checkpointId = (body as Record<string, unknown>).checkpointId;
+  const prompt = (body as Record<string, unknown>).prompt;
+  if (typeof checkpointId !== "string" || typeof prompt !== "string") {
+    return c.json({ error: "checkpointId and prompt are required" }, 400);
+  }
+
+  const task = tasks.get(id) ?? (await getTask(id));
+  if (!task) return c.json({ error: "task not found" }, 404);
+
+  const checkpoint = await getCheckpoint(checkpointId);
+  if (!checkpoint) return c.json({ error: "checkpoint not found" }, 404);
+  if (checkpoint.taskId !== id) return c.json({ error: "checkpoint does not belong to task" }, 400);
+
+  await syncEventsFromRedis(id);
+  const events = await getEvents(id);
+  const created = events.find((e) => e.type === "sandbox_created" || e.type === "sandbox_resumed");
+  const sandboxId = created?.data && typeof created.data === "object" ? (created.data as Record<string, unknown>).sandboxId : undefined;
+  if (typeof sandboxId !== "string") {
+    return c.json({ error: "sandbox not yet created" }, 400);
+  }
+
+  await spawnRewind(task, sandboxId, checkpointId, prompt);
+  return c.json({ taskId: task.id, checkpointId, status: task.status }, 202);
 });
 
 app.get("/api/tasks/:id/stream", (c) => {

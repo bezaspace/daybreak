@@ -33,6 +33,8 @@ async function main() {
   const prBranch = getArg("--pr-branch") || `daybreak/${randomUUID()}`;
   const taskId = getArg("--task-id") || randomUUID();
   const taskPrompt = getArg("--prompt");
+  const rewindToCheckpoint = getArg("--rewind-to-checkpoint");
+  const parentTaskId = getArg("--parent-task-id") || taskId;
   const connectId = getArg("--connect");
   const isReview = hasArg("--review");
   const keepAlive = hasArg("--keep-alive");
@@ -93,6 +95,8 @@ async function main() {
     PR_BRANCH_NAME: prBranch,
     TASK_PROMPT: taskPrompt || "",
     REVIEW_MODE: String(isReview),
+    REWIND_TO_CHECKPOINT: rewindToCheckpoint || "",
+    PARENT_TASK_ID: parentTaskId,
     PW_EXECUTABLE_PATH: "/usr/bin/chromium",
     PLAYWRIGHT_BROWSERS_PATH: "0",
     UPSTASH_REDIS_REST_URL: config.upstashRedisRestUrl || "",
@@ -184,6 +188,11 @@ async function main() {
       console.log(pc.bold(`[sandbox] reusing existing template ${templateName}; skipping setup`));
     } else {
       console.log(pc.bold(`[sandbox] using pre-built template ${templateName}; skipping Node/Chromium install`));
+    }
+
+    if (rewindToCheckpoint) {
+      console.log(pc.bold("[sandbox] killing existing run-task process before rewind"));
+      await sandbox.commands.run(`pkill -f run-task.cjs || true`, { timeoutMs: 30_000 });
     }
 
     console.log(pc.bold("[sandbox] uploading agent bundle..."));

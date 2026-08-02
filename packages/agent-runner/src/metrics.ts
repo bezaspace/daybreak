@@ -25,6 +25,14 @@ export class MetricsCollector {
     this.metrics.turns++;
   }
 
+  setTurns(turns: number): void {
+    this.metrics.turns = turns;
+  }
+
+  setCostUsd(costUsd: number): void {
+    this.metrics.estimatedCostUsd = costUsd;
+  }
+
   startToolCall(record: ToolCallRecord): void {
     this.toolCalls.push(record);
   }

@@ -5,12 +5,17 @@ import { existsSync, writeFileSync } from "node:fs";
 import pc from "picocolors";
 import { TaskRunner, type TaskEvent } from "./session.js";
 import { createStreamPublisher } from "./stream.js";
+import { CheckpointStore } from "./checkpoint.js";
+import { SessionStore } from "./session-store.js";
+import type { Checkpoint } from "@daybreak/shared";
 
 const workDir = process.env.WORK_DIR || "/tmp";
 const targetRepoUrl = process.env.TARGET_REPO_URL;
 const targetBranch = process.env.TARGET_BRANCH || "main";
 const targetDir = process.env.TARGET_DIR || `${workDir}/target`;
 const taskId = process.env.TASK_ID || `task-${Date.now()}`;
+const rewindToCheckpoint = process.env.REWIND_TO_CHECKPOINT;
+const parentTaskId = process.env.PARENT_TASK_ID || taskId;
 const prBranch = process.env.PR_BRANCH_NAME || `daybreak/${taskId}`;
 const autoApprove = process.env.AUTO_APPROVE !== "false";
 const pushAfterFix = process.env.PUSH_AFTER_FIX !== "false";
@@ -106,6 +111,12 @@ function toStreamData(event: TaskEvent): unknown {
         costUsd: cp.costUsd,
       };
     }
+    case "checkpoint_restored": {
+      const cp = event.checkpoint;
+      return { checkpointId: cp.id, turn: cp.turn, gitCommit: cp.gitCommit, sessionRef: cp.sessionRef };
+    }
+    case "task_rewind":
+      return { checkpointId: event.checkpointId, prompt: event.prompt };
     default:
       return {};
   }
@@ -131,33 +142,66 @@ async function main() {
     process.env.GIT_ASKPASS = gitAskpassPath;
   }
 
-  console.log(pc.bold("[run-task] cloning target repo..."));
-  if (process.env.REVIEW_MODE === "true") {
-    if (existsSync(`${targetDir}/.git`)) {
-      console.log(pc.bold("[run-task] using existing repo for review..."));
-      run(
-        `git config user.name "Daybreak Bot" && git config user.email "daybreak@example.com" && git fetch origin && git checkout ${prBranch} && git pull origin ${prBranch}`,
-        targetDir,
-        "inherit",
-      );
+  let checkpoint: Checkpoint | undefined;
+
+  if (rewindToCheckpoint) {
+    console.log(pc.bold(`[run-task] restoring checkpoint ${rewindToCheckpoint}...`));
+    const cpSessionStore = new SessionStore({
+      taskId: parentTaskId,
+      cwd: targetDir,
+      supabaseUrl: config.supabaseUrl,
+      supabaseServiceKey: config.supabaseServiceKey,
+    });
+    const cpStore = new CheckpointStore({
+      taskId: parentTaskId,
+      cwd: targetDir,
+      sessionStore: cpSessionStore,
+      supabaseUrl: config.supabaseUrl,
+      supabaseServiceKey: config.supabaseServiceKey,
+    });
+    const found = await cpStore.getCheckpoint(rewindToCheckpoint);
+    if (!found || !found.gitCommit) {
+      throw new Error(`Checkpoint ${rewindToCheckpoint} not found or has no git commit`);
+    }
+    checkpoint = found;
+
+    if (!existsSync(`${targetDir}/.git`)) {
+      throw new Error(`Repository at ${targetDir} not found; cannot rewind`);
+    }
+    run(
+      `git config user.name "Daybreak Bot" && git config user.email "daybreak@example.com" && git reset --hard && git checkout -B ${prBranch} ${checkpoint.gitCommit} && git reset --hard && git clean -fd`,
+      targetDir,
+      "inherit",
+    );
+  } else {
+    console.log(pc.bold("[run-task] cloning target repo..."));
+    if (process.env.REVIEW_MODE === "true") {
+      if (existsSync(`${targetDir}/.git`)) {
+        console.log(pc.bold("[run-task] using existing repo for review..."));
+        run(
+          `git config user.name "Daybreak Bot" && git config user.email "daybreak@example.com" && git fetch origin && git checkout ${prBranch} && git pull origin ${prBranch}`,
+          targetDir,
+          "inherit",
+        );
+      } else {
+        run(`git clone --branch ${prBranch} --single-branch ${targetRepoUrl} "${targetDir}"`, workDir, "inherit");
+        run(
+          `git config user.name "Daybreak Bot" && git config user.email "daybreak@example.com"`,
+          targetDir,
+          "inherit",
+        );
+      }
     } else {
-      run(`git clone --branch ${prBranch} --single-branch ${targetRepoUrl} "${targetDir}"`, workDir, "inherit");
+      run(`rm -rf "${targetDir}" && git clone --branch ${targetBranch} --single-branch ${targetRepoUrl} "${targetDir}"`, workDir, "inherit");
+
+      // Create the feature branch and set git identity so the agent cannot
+      // accidentally push to the protected target branch.
       run(
-        `git config user.name "Daybreak Bot" && git config user.email "daybreak@example.com"`,
+        `git config user.name "Daybreak Bot" && git config user.email "daybreak@example.com" && git checkout -b ${prBranch}`,
         targetDir,
         "inherit",
       );
     }
-  } else {
-    run(`rm -rf "${targetDir}" && git clone --branch ${targetBranch} --single-branch ${targetRepoUrl} "${targetDir}"`, workDir, "inherit");
-
-    // Create the feature branch and set git identity so the agent cannot
-    // accidentally push to the protected target branch.
-    run(
-      `git config user.name "Daybreak Bot" && git config user.email "daybreak@example.com" && git checkout -b ${prBranch}`,
-      targetDir,
-      "inherit",
-    );
   }
 
   console.log(pc.bold("[run-task] config:"), {
@@ -177,7 +221,8 @@ async function main() {
       cwd: targetDir,
       systemPrompt,
       autoApprove,
-      taskId,
+      taskId: parentTaskId,
+      checkpoint,
       onEvent: (event) => {
         publisher.publish(event.type, toStreamData(event));
         if (event.type === "tool_execution_update" && event.toolName === "browser") {

@@ -107,6 +107,10 @@ export class CheckpointStore {
     return this.updateSupabase(id, { status });
   }
 
+  setLastCheckpointId(id: string): void {
+    this.lastCheckpointId = id;
+  }
+
   async flush(): Promise<void> {
     await Promise.all(this.pending);
     this.pending = [];

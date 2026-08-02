@@ -114,6 +114,14 @@ function formatEvent(event: StreamEvent): string {
     const cost = typeof data.costUsd === "number" ? ` cost=$${data.costUsd.toFixed(4)}` : "";
     return `[${time}] checkpoint_created: turn=${data.turn ?? "-"} commit=${(data.gitCommit ?? "").slice(0, 7)} checkpoint=${data.checkpointId ?? "-"}${cost}`;
   }
+  if (event.type === "checkpoint_restored") {
+    const data = event.data as { turn?: number; checkpointId?: string; gitCommit?: string; sessionRef?: string };
+    return `[${time}] checkpoint_restored: turn=${data.turn ?? "-"} commit=${(data.gitCommit ?? "").slice(0, 7)} checkpoint=${data.checkpointId ?? "-"}`;
+  }
+  if (event.type === "task_rewind") {
+    const data = event.data as { checkpointId?: string; prompt?: string };
+    return `[${time}] task_rewind: checkpoint=${data.checkpointId ?? "-"} prompt=${(data.prompt ?? "").slice(0, 80)}`;
+  }
   if (event.type === "commit_pushed") {
     const data = event.data as { prBranch?: string };
     return `[${time}] commit_pushed: ${data.prBranch || "-"}`;

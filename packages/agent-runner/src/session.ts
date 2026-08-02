@@ -18,7 +18,9 @@ import { initTelemetry, shutdownTelemetry } from "./telemetry.js";
 type ProviderSwitchEvent = { type: "provider_switched" } & ProviderSwitchInfo;
 type FallbackAppliedEvent = { type: "fallback_applied" } & ProviderSwitchInfo;
 type CheckpointCreatedEvent = { type: "checkpoint_created"; checkpoint: Checkpoint };
-export type TaskEvent = AgentSessionEvent | ProviderSwitchEvent | FallbackAppliedEvent | CheckpointCreatedEvent;
+type CheckpointRestoredEvent = { type: "checkpoint_restored"; checkpoint: Checkpoint };
+type TaskRewindEvent = { type: "task_rewind"; checkpointId: string; prompt: string };
+export type TaskEvent = AgentSessionEvent | ProviderSwitchEvent | FallbackAppliedEvent | CheckpointCreatedEvent | CheckpointRestoredEvent | TaskRewindEvent;
 
 export interface RunOptions {
   prompt: string;
@@ -28,6 +30,7 @@ export interface RunOptions {
   onStream?: (text: string) => void;
   onEvent?: (event: TaskEvent) => void;
   taskId?: string;
+  checkpoint?: Checkpoint;
 }
 
 export class TaskRunner {
@@ -66,7 +69,7 @@ export class TaskRunner {
   }
 
   async run(options: RunOptions): Promise<TaskResult> {
-    const { prompt, cwd, systemPrompt, autoApprove, onStream, onEvent, taskId: explicitTaskId } = options;
+    const { prompt, cwd, systemPrompt, autoApprove, onStream, onEvent, taskId: explicitTaskId, checkpoint } = options;
     this.onEvent = onEvent;
 
     const telemetry = initTelemetry({
@@ -121,15 +124,33 @@ export class TaskRunner {
     );
 
     const sessionDir = join(cwd, ".daybreak", "session");
+    let sessionManager: SessionManager;
+    if (checkpoint) {
+      const restoredFile = await sessionStore.restore(checkpoint.sessionRef ?? "", sessionDir);
+      sessionManager = SessionManager.open(restoredFile, sessionDir, cwd);
+      sessionManager.buildSessionContext();
+      this.metrics.setTurns(checkpoint.turn);
+      this.metrics.setCostUsd(checkpoint.costUsd ?? 0);
+      this.checkpointStore.setLastCheckpointId(checkpoint.id);
+      this.onEvent?.({ type: "checkpoint_restored", checkpoint });
+      this.onEvent?.({ type: "task_rewind", checkpointId: checkpoint.id, prompt });
+    } else {
+      sessionManager = SessionManager.create(cwd, sessionDir);
+    }
+
     const { session } = await createAgentSession({
       modelRuntime,
       model,
       tools: ["read", "bash", "edit", "write", "browser"],
       customTools: [browserTool],
-      sessionManager: SessionManager.create(cwd, sessionDir),
+      sessionManager,
       settingsManager,
       cwd,
     });
+
+    if (checkpoint) {
+      session.agent.state.messages = sessionManager.buildSessionContext().messages;
+    }
 
     this.session = session;
 

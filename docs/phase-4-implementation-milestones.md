@@ -102,21 +102,21 @@ This is the cheap, deterministic filesystem rewind strategy recommended by `TIME
 
 This is the first demoable time-travel slice: rewind within the same sandbox before tackling the harder cross-sandbox fork.
 
-- [ ] Add `--rewind-to-checkpoint=<checkpointId>` and `--parent-task-id=<taskId>` flags to `packages/agent-runner/src/run-task.ts`.
-- [ ] In `run-task.ts`, when `--rewind-to-checkpoint` is set:
+- [x] Add `--rewind-to-checkpoint=<checkpointId>` and `--parent-task-id=<taskId>` flags to `packages/agent-runner/src/run-task.ts`.
+- [x] In `run-task.ts`, when `--rewind-to-checkpoint` is set:
   - Do **not** `rm -rf` the target directory
   - Fetch the checkpoint from `CheckpointStore`
   - Run `git checkout <git_commit>` and clean the working tree (`git reset --hard && git clean -fd`)
   - Restore the Pi session from the checkpoint's `sessionRef` JSONL
   - Set `TASK_PROMPT` to the user's edited prompt
   - Continue the `TaskRunner` loop from that turn
-- [ ] Add `POST /api/tasks/:id/rewind` to the control plane:
+- [x] Add `POST /api/tasks/:id/rewind` to the control plane:
   - Body: `{ checkpointId, prompt }`
   - If the sandbox is still alive, signal it to rewind (for the local MVP this can be a new sandbox spawn that re-uses the same E2B sandbox; true in-process rewind is deferred to a control-channel later phase)
   - For the local MVP, the simplest reliable path is: spawn a new `run-task` bundle in the **same** connected sandbox with `--rewind-to-checkpoint` and `--parent-task-id`
-- [ ] Emit `checkpoint_restored` and `task_rewind` stream events.
-- [ ] Update `packages/ui/src/App.tsx` to surface rewind events.
-- [ ] Add unit/integration tests for `CheckpointStore` and rewind checkout logic.
+- [x] Emit `checkpoint_restored` and `task_rewind` stream events.
+- [x] Update `packages/ui/src/App.tsx` to surface rewind events.
+- [x] Add unit/integration tests for `CheckpointStore` and rewind checkout logic.
 
 **Acceptance:**
 - Start a task, let it run for 4 turns, then call `POST /api/tasks/:id/rewind` with the turn-2 checkpoint and a new prompt.
