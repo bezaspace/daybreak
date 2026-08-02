@@ -189,20 +189,20 @@ This is the first demoable time-travel slice: rewind within the same sandbox bef
 
 **What it ships:** A user can promote a branch so its result becomes the primary PR, and abandoned branches are paused/killed to save cost.
 
-- [ ] Add `POST /api/tasks/:id/promote` to the control plane:
+- [x] Add `POST /api/tasks/:id/promote` to the control plane:
   - Marks the branch task as `promoted`
   - Marks sibling branches as `abandoned`
   - Opens a PR from the branch's `prBranch` (or updates an existing PR head if GitHub allows it; GitHub PRs have fixed head branches, so the cleanest approach is to open a new PR and optionally close the old one)
   - Updates the original parent task's `prUrl` and `prNumber` to point to the promoted PR
-- [ ] Add branch-kill logic:
+- [x] Add branch-kill logic:
   - When a branch is abandoned, kill its E2B sandbox if still alive to avoid paying for idle parallel sandboxes
   - Emit `branch_abandoned` and `sandbox_killed` events
-- [ ] Add `POST /api/tasks/:id/abandon` for manual abandonment.
-- [ ] Update the UI:
+- [x] Add `POST /api/tasks/:id/abandon` for manual abandonment.
+- [x] Update the UI:
   - Show "Promote" and "Abandon" buttons on branch tasks
   - Show the primary PR link on the parent task after promotion
   - Gray out abandoned branches
-- [ ] Add safety guard: promotion cannot override `main`/`master`; it always operates on the feature branch.
+- [x] Add safety guard: promotion cannot override `main`/`master`; it always operates on the feature branch.
 
 **Acceptance:**
 - After a fork completes and the user likes the result, clicking "Promote" makes the branch's PR the primary deliverable.

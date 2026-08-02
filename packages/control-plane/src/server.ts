@@ -24,6 +24,7 @@ import {
   countTasksByWorkspace,
   listCheckpoints,
   getCheckpoint,
+  updateCheckpoint,
   type Task,
   type StreamEvent,
 } from "./db.js";
@@ -456,6 +457,7 @@ async function spawnFork(
   });
   tasks.set(child.id, child);
   await persistTask(child);
+  await updateCheckpoint(checkpoint.id, { branchTaskId: child.id });
   await publishEvent(child.id, "task_start", { repo: child.repo, branch: child.branch, prBranch: child.prBranch, parentTaskId: parent.id, parentCheckpointId: checkpoint.id });
 
   let e2bSnapshotId = snapshotId;
@@ -610,6 +612,77 @@ async function validatePat(repoUrl: string, token: string): Promise<{ ok: boolea
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+async function killSandbox(sandboxId: string): Promise<boolean> {
+  try {
+    return await Sandbox.kill(sandboxId, { apiKey: config.e2bApiKey });
+  } catch (error) {
+    console.error(`[control-plane] failed to kill sandbox ${sandboxId}:`, error);
+    return false;
+  }
+}
+
+async function resolveTaskSandboxId(task: Task): Promise<string | undefined> {
+  if (task.sandboxId) return task.sandboxId;
+  await syncEventsFromRedis(task.id);
+  const events = await getEvents(task.id);
+  const sandboxEventTypes = new Set(["sandbox_created", "sandbox_resumed", "sandbox_keep_alive"]);
+  const latest = [...events].reverse().find((ev) => sandboxEventTypes.has(ev.type));
+  return latest?.data && typeof latest.data === "object" ? (latest.data as Record<string, unknown>).sandboxId as string | undefined : undefined;
+}
+
+async function abandonTask(task: Task): Promise<void> {
+  if (task.status === "abandoned") return;
+  const sandboxId = await resolveTaskSandboxId(task);
+  task.status = "abandoned";
+  task.endedAt = Date.now();
+  tasks.set(task.id, task);
+  await updateTask(task.id, { status: "abandoned", endedAt: task.endedAt });
+  await publishEvent(task.id, "branch_abandoned", { childTaskId: task.id });
+  if (sandboxId) {
+    const killed = await killSandbox(sandboxId);
+    await publishEvent(task.id, "sandbox_killed", { sandboxId, killed });
+  }
+}
+
+async function promoteTask(task: Task): Promise<{ url: string; number: number } | undefined> {
+  if (task.status === "promoted") return undefined;
+  if (!task.parentTaskId) throw new Error("Cannot promote a task with no parent");
+  if (!config.githubToken) throw new Error("GITHUB_TOKEN not configured");
+  if (task.prBranch === task.branch || task.branch === "main" || task.branch === "master") {
+    throw new TaskRejectedError("Promotion cannot override the protected base branch", 400);
+  }
+
+  const pr = await createPullRequest(task.repo, task.prBranch, task.branch, config.githubToken);
+  if (!pr) throw new Error("PR creation failed during promotion");
+
+  task.status = "promoted";
+  task.prUrl = pr.url;
+  task.prNumber = pr.number;
+  task.endedAt = Date.now();
+  tasks.set(task.id, task);
+  await updateTask(task.id, { status: "promoted", prUrl: pr.url, prNumber: pr.number, endedAt: task.endedAt });
+  await publishEvent(task.id, "branch_promoted", { childTaskId: task.id, prUrl: pr.url, prNumber: pr.number });
+
+  const parent = tasks.get(task.parentTaskId) ?? (await getTask(task.parentTaskId));
+  if (parent) {
+    parent.prUrl = pr.url;
+    parent.prNumber = pr.number;
+    tasks.set(parent.id, parent);
+    await updateTask(parent.id, { prUrl: pr.url, prNumber: pr.number });
+  }
+
+  const all = await getTasks();
+  for (const sibling of all) {
+    if (sibling.id !== task.id && sibling.parentTaskId === task.parentTaskId && sibling.status !== "abandoned" && sibling.status !== "promoted") {
+      const inMemory = tasks.get(sibling.id);
+      if (inMemory) await abandonTask(inMemory);
+      else await abandonTask(sibling);
+    }
+  }
+
+  return pr;
 }
 
 async function checkWorkspaceLimit(workspace: { id: string; tasksPerHour: number } | undefined, label: string): Promise<void> {
@@ -1045,6 +1118,36 @@ app.post("/api/tasks/:id/rewind", async (c) => {
 
   await spawnRewind(task, sandboxId, checkpointId, prompt);
   return c.json({ taskId: task.id, checkpointId, status: task.status }, 202);
+});
+
+app.post("/api/tasks/:id/abandon", async (c) => {
+  const id = c.req.param("id");
+  const task = tasks.get(id) ?? (await getTask(id));
+  if (!task) return c.json({ error: "task not found" }, 404);
+  if (task.status === "complete" || task.status === "failed" || task.status === "abandoned" || task.status === "promoted") {
+    return c.json({ error: "task is already finished" }, 400);
+  }
+  await abandonTask(task);
+  return c.json({ taskId: task.id, status: task.status }, 202);
+});
+
+app.post("/api/tasks/:id/promote", async (c) => {
+  const id = c.req.param("id");
+  const task = tasks.get(id) ?? (await getTask(id));
+  if (!task) return c.json({ error: "task not found" }, 404);
+  if (!task.parentTaskId) return c.json({ error: "task is not a branch" }, 400);
+  if (task.status !== "complete") {
+    return c.json({ error: "task must be complete before promotion" }, 400);
+  }
+  try {
+    const pr = await promoteTask(task);
+    if (!pr) return c.json({ error: "task is already promoted or PR creation failed" }, 500);
+    return c.json({ taskId: task.id, status: task.status, prUrl: pr.url, prNumber: pr.number }, 200);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const status = error instanceof TaskRejectedError ? error.status : 500;
+    return c.json({ error: message }, status as 400 | 500);
+  }
 });
 
 app.get("/api/tasks/:id/stream", (c) => {

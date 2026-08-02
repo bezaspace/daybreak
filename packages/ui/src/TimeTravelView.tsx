@@ -176,6 +176,30 @@ export function TimeTravelView({ taskId }: { taskId: string }) {
     }
   }
 
+  async function handlePromote(branchTaskId: string, checkpointId: string) {
+    setMessages((m) => ({ ...m, [checkpointId]: "Promoting..." }));
+    try {
+      const res = await fetch(`/api/tasks/${branchTaskId}/promote`, { method: "POST" });
+      const data = (await res.json()) as { prUrl?: string; error?: string };
+      if (!res.ok) throw new Error(data.error || "promote failed");
+      setMessages((m) => ({ ...m, [checkpointId]: `Promoted → ${data.prUrl || "ok"}` }));
+    } catch (err) {
+      setMessages((m) => ({ ...m, [checkpointId]: `Promote error: ${err instanceof Error ? err.message : String(err)}` }));
+    }
+  }
+
+  async function handleAbandon(branchTaskId: string, checkpointId: string) {
+    setMessages((m) => ({ ...m, [checkpointId]: "Abandoning..." }));
+    try {
+      const res = await fetch(`/api/tasks/${branchTaskId}/abandon`, { method: "POST" });
+      const data = (await res.json()) as { status?: string; error?: string };
+      if (!res.ok) throw new Error(data.error || "abandon failed");
+      setMessages((m) => ({ ...m, [checkpointId]: `Abandoned` }));
+    } catch (err) {
+      setMessages((m) => ({ ...m, [checkpointId]: `Abandon error: ${err instanceof Error ? err.message : String(err)}` }));
+    }
+  }
+
   function renderNode(checkpoint: Checkpoint, depth: number): ReactNode {
     const toolName = checkpoint.toolCallId ? toolNameByCallId[checkpoint.toolCallId] : undefined;
     const branchChildren = childrenOf(checkpoints, checkpoint.id);
@@ -206,13 +230,23 @@ export function TimeTravelView({ taskId }: { taskId: string }) {
             rows={2}
             style={{ width: "100%", padding: "0.5rem", fontFamily: "inherit", marginBottom: "0.5rem" }}
           />
-          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
             <button type="button" onClick={() => handleFork(checkpoint)} style={{ padding: "0.25rem 0.75rem" }}>
               Fork from here
             </button>
             <button type="button" onClick={() => handleRewind(checkpoint)} style={{ padding: "0.25rem 0.75rem" }}>
               Rewind to here
             </button>
+            {checkpoint.branchTaskId && (
+              <>
+                <button type="button" onClick={() => handlePromote(checkpoint.branchTaskId!, checkpoint.id)} style={{ padding: "0.25rem 0.75rem" }}>
+                  Promote branch
+                </button>
+                <button type="button" onClick={() => handleAbandon(checkpoint.branchTaskId!, checkpoint.id)} style={{ padding: "0.25rem 0.75rem" }}>
+                  Abandon branch
+                </button>
+              </>
+            )}
             {messages[checkpoint.id] && <span style={{ fontSize: 13, color: "#555" }}>{messages[checkpoint.id]}</span>}
             <button type="button" onClick={() => setSelectedId((id) => (id === checkpoint.id ? null : checkpoint.id))} style={{ padding: "0.25rem 0.75rem", marginLeft: "auto" }}>
               {selectedId === checkpoint.id ? "Hide details" : "Details"}

@@ -129,6 +129,10 @@ function formatEvent(event: StreamEvent): string {
     const data = event.data as { checkpointId?: string; prompt?: string; parentTaskId?: string; childTaskId?: string };
     return `[${time}] branch_forked: parent=${data.parentTaskId ?? "-"} checkpoint=${data.checkpointId ?? "-"} child=${data.childTaskId?.slice(0, 8) ?? "-"} prompt=${(data.prompt ?? "").slice(0, 80)}`;
   }
+  if (event.type === "sandbox_killed") {
+    const data = event.data as { sandboxId?: string; killed?: boolean };
+    return `[${time}] sandbox_killed: sandbox=${data.sandboxId ?? "-"} killed=${data.killed ?? "-"}`;
+  }
   if (event.type === "branch_promoted") {
     const data = event.data as { childTaskId?: string; prUrl?: string };
     return `[${time}] branch_promoted: child=${data.childTaskId?.slice(0, 8) ?? "-"} pr=${data.prUrl || "-"}`;
@@ -440,7 +444,13 @@ export function App() {
       <h2>Recent tasks</h2>
       <ul>
         {tasks.map((t) => (
-          <li key={t.id}>
+          <li
+            key={t.id}
+            style={{
+              opacity: t.status === "abandoned" ? 0.5 : 1,
+              color: t.status === "promoted" ? "#2e7d32" : undefined,
+            }}
+          >
             <code>{t.id}</code> — {t.repo} @ {t.branch} · {t.status}
             {t.parentTaskId && ` · branch of ${t.parentTaskId.slice(0, 8)}`}
             {t.prBranch && ` · ${t.prBranch}`}

@@ -45,7 +45,7 @@ export interface Task {
   repo: string;
   branch: string;
   prBranch: string;
-  status: "pending" | "running" | "complete" | "failed";
+  status: "pending" | "running" | "complete" | "failed" | "abandoned" | "promoted";
   startedAt: number;
   endedAt?: number;
   exitCode?: number;
@@ -420,6 +420,20 @@ export async function updateCheckpointStatus(id: string, status: Checkpoint["sta
     .eq("id", id);
   if (error) {
     console.error("[db] updateCheckpointStatus error:", error.message);
+    return false;
+  }
+  return true;
+}
+
+export async function updateCheckpoint(id: string, updates: Partial<Pick<Checkpoint, "branchTaskId" | "status">>): Promise<boolean> {
+  const supabase = getSupabase();
+  if (!supabase) return false;
+  const payload: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if (updates.branchTaskId !== undefined) payload.branch_task_id = updates.branchTaskId ?? null;
+  if (updates.status !== undefined) payload.status = updates.status;
+  const { error } = await supabase.from("checkpoints").update(payload).eq("id", id);
+  if (error) {
+    console.error("[db] updateCheckpoint error:", error.message);
     return false;
   }
   return true;
