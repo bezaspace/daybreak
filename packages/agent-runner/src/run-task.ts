@@ -96,6 +96,16 @@ function toStreamData(event: TaskEvent): unknown {
     case "provider_switched":
     case "fallback_applied":
       return { from: event.from, to: event.to, reason: event.reason, modelId: event.modelId };
+    case "checkpoint_created": {
+      const cp = event.checkpoint;
+      return {
+        turn: cp.turn,
+        gitCommit: cp.gitCommit,
+        sessionRef: cp.sessionRef,
+        checkpointId: cp.id,
+        costUsd: cp.costUsd,
+      };
+    }
     default:
       return {};
   }

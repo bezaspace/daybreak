@@ -82,3 +82,11 @@ export interface AgentStateSnapshot {
   sessionFile?: string;
   sessionJsonl?: string;
 }
+
+export interface SessionSnapshot {
+  id: string;
+  taskId: string;
+  turn: number;
+  jsonl: string;
+  createdAt?: number;
+}

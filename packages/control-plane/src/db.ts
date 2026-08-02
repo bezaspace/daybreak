@@ -1,5 +1,6 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { loadConfig } from "@daybreak/shared";
+import type { Checkpoint, PersistedCheckpoint } from "@daybreak/shared";
 
 export interface PersistedTask {
   id: string;
@@ -21,6 +22,8 @@ export interface PersistedTask {
   sandbox_id?: string | null;
   keep_alive_until?: string | null;
   workspace_id?: string | null;
+  head_checkpoint_id?: string | null;
+  root_checkpoint_id?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -55,6 +58,8 @@ export interface Task {
   sandboxId?: string;
   keepAliveUntil?: number;
   workspaceId?: string;
+  headCheckpointId?: string;
+  rootCheckpointId?: string;
 }
 
 export interface PersistedWorkspace {
@@ -117,6 +122,8 @@ function toTask(row: PersistedTask): Task {
     sandboxId: row.sandbox_id ?? undefined,
     keepAliveUntil: row.keep_alive_until ? new Date(row.keep_alive_until).getTime() : undefined,
     workspaceId: row.workspace_id ?? undefined,
+    headCheckpointId: row.head_checkpoint_id ?? undefined,
+    rootCheckpointId: row.root_checkpoint_id ?? undefined,
   };
 }
 
@@ -143,6 +150,8 @@ export async function persistTask(task: Task): Promise<boolean> {
     sandbox_id: task.sandboxId ?? null,
     keep_alive_until: task.keepAliveUntil ? new Date(task.keepAliveUntil).toISOString() : null,
     workspace_id: task.workspaceId ?? null,
+    head_checkpoint_id: task.headCheckpointId ?? null,
+    root_checkpoint_id: task.rootCheckpointId ?? null,
     updated_at: new Date().toISOString(),
   });
   if (error) {
@@ -164,6 +173,8 @@ export async function updateTask(id: string, updates: Partial<Task>): Promise<bo
   if (updates.provider !== undefined) payload.provider = updates.provider ?? null;
   if (updates.costUsd !== undefined) payload.cost_usd = updates.costUsd ?? null;
   if (updates.workspaceId !== undefined) payload.workspace_id = updates.workspaceId ?? null;
+  if (updates.headCheckpointId !== undefined) payload.head_checkpoint_id = updates.headCheckpointId ?? null;
+  if (updates.rootCheckpointId !== undefined) payload.root_checkpoint_id = updates.rootCheckpointId ?? null;
   const { error } = await supabase.from("tasks").update(payload).eq("id", id);
   if (error) {
     console.error("[db] updateTask error:", error.message);
@@ -302,4 +313,104 @@ export async function getEvents(taskId: string, after = 0): Promise<StreamEvent[
     timestamp: row.timestamp,
     data: row.data,
   }));
+}
+
+function toCheckpoint(row: PersistedCheckpoint): Checkpoint {
+  return {
+    id: row.id,
+    taskId: row.task_id,
+    turn: row.turn,
+    timestamp: new Date(row.timestamp).getTime(),
+    gitCommit: row.git_commit ?? undefined,
+    sessionRef: row.session_ref ?? undefined,
+    parentCheckpointId: row.parent_checkpoint_id ?? undefined,
+    branchTaskId: row.branch_task_id ?? undefined,
+    status: row.status as Checkpoint["status"],
+    toolCallId: row.tool_call_id ?? undefined,
+    costUsd: row.cost_usd ?? undefined,
+  };
+}
+
+export async function persistCheckpoint(checkpoint: Checkpoint): Promise<boolean> {
+  const supabase = getSupabase();
+  if (!supabase) return false;
+  const { error } = await supabase.from("checkpoints").upsert({
+    id: checkpoint.id,
+    task_id: checkpoint.taskId,
+    turn: checkpoint.turn,
+    timestamp: new Date(checkpoint.timestamp).toISOString(),
+    git_commit: checkpoint.gitCommit ?? null,
+    session_ref: checkpoint.sessionRef ?? null,
+    parent_checkpoint_id: checkpoint.parentCheckpointId ?? null,
+    branch_task_id: checkpoint.branchTaskId ?? null,
+    status: checkpoint.status,
+    tool_call_id: checkpoint.toolCallId ?? null,
+    cost_usd: checkpoint.costUsd ?? null,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) {
+    console.error("[db] persistCheckpoint error:", error.message);
+    return false;
+  }
+  return true;
+}
+
+export async function getCheckpoint(id: string): Promise<Checkpoint | undefined> {
+  const supabase = getSupabase();
+  if (!supabase) return undefined;
+  const { data, error } = await supabase.from("checkpoints").select("*").eq("id", id).maybeSingle<PersistedCheckpoint>();
+  if (error || !data) {
+    if (error) console.error("[db] getCheckpoint error:", error.message);
+    return undefined;
+  }
+  return toCheckpoint(data);
+}
+
+export async function listCheckpoints(taskId: string): Promise<Checkpoint[]> {
+  const supabase = getSupabase();
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from("checkpoints")
+    .select("*")
+    .eq("task_id", taskId)
+    .order("turn", { ascending: true })
+    .order("timestamp", { ascending: true })
+    .returns<PersistedCheckpoint[]>();
+  if (error) {
+    console.error("[db] listCheckpoints error:", error.message);
+    return [];
+  }
+  return (data || []).map(toCheckpoint);
+}
+
+export async function getLatestCheckpoint(taskId: string): Promise<Checkpoint | undefined> {
+  const supabase = getSupabase();
+  if (!supabase) return undefined;
+  const { data, error } = await supabase
+    .from("checkpoints")
+    .select("*")
+    .eq("task_id", taskId)
+    .order("turn", { ascending: false })
+    .order("timestamp", { ascending: false })
+    .limit(1)
+    .maybeSingle<PersistedCheckpoint>();
+  if (error || !data) {
+    if (error) console.error("[db] getLatestCheckpoint error:", error.message);
+    return undefined;
+  }
+  return toCheckpoint(data);
+}
+
+export async function updateCheckpointStatus(id: string, status: Checkpoint["status"]): Promise<boolean> {
+  const supabase = getSupabase();
+  if (!supabase) return false;
+  const { error } = await supabase
+    .from("checkpoints")
+    .update({ status, updated_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) {
+    console.error("[db] updateCheckpointStatus error:", error.message);
+    return false;
+  }
+  return true;
 }

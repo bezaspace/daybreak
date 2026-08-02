@@ -3,18 +3,22 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai/compat";
 import { context, trace, SpanStatusCode, type Span, type Context, type Tracer } from "@opentelemetry/api";
 import type { TracerProvider } from "@opentelemetry/sdk-trace";
-import type { DaybreakConfig, TaskResult, ToolCallRecord } from "@daybreak/shared";
+import type { Checkpoint, DaybreakConfig, TaskResult, ToolCallRecord } from "@daybreak/shared";
 import { SafetyMiddleware } from "@daybreak/shared";
 import pc from "picocolors";
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import { browserTool, closeBrowser } from "./browser-tool.js";
+import { CheckpointStore } from "./checkpoint.js";
 import { createModelRuntime, type ProviderSwitchInfo } from "./llm.js";
 import { MetricsCollector } from "./metrics.js";
+import { SessionStore } from "./session-store.js";
 import { initTelemetry, shutdownTelemetry } from "./telemetry.js";
 
 type ProviderSwitchEvent = { type: "provider_switched" } & ProviderSwitchInfo;
 type FallbackAppliedEvent = { type: "fallback_applied" } & ProviderSwitchInfo;
-export type TaskEvent = AgentSessionEvent | ProviderSwitchEvent | FallbackAppliedEvent;
+type CheckpointCreatedEvent = { type: "checkpoint_created"; checkpoint: Checkpoint };
+export type TaskEvent = AgentSessionEvent | ProviderSwitchEvent | FallbackAppliedEvent | CheckpointCreatedEvent;
 
 export interface RunOptions {
   prompt: string;
@@ -46,6 +50,9 @@ export class TaskRunner {
   private taskId?: string;
   private traceId?: string;
   private activeProvider: string;
+  private checkpointStore?: CheckpointStore;
+  private pendingCheckpoints: Promise<void>[] = [];
+  private lastToolCallId?: string;
 
   constructor(config: DaybreakConfig) {
     this.config = config;
@@ -86,20 +93,40 @@ export class TaskRunner {
       this.config.llmPricing,
     );
 
-    const settingsManager = SettingsManager.inMemory({
-      compaction: {
-        enabled: this.config.compactionEnabled,
-        reserveTokens: this.config.compactionReserveTokens,
-        keepRecentTokens: this.config.compactionKeepRecentTokens,
-      },
+    const taskId = this.taskId ?? randomUUID();
+    const sessionStore = new SessionStore({
+      taskId,
+      cwd,
+      supabaseUrl: this.config.supabaseUrl,
+      supabaseServiceKey: this.config.supabaseServiceKey,
+    });
+    this.checkpointStore = new CheckpointStore({
+      taskId,
+      cwd,
+      sessionStore,
+      supabaseUrl: this.config.supabaseUrl,
+      supabaseServiceKey: this.config.supabaseServiceKey,
     });
 
+    const settingsManager = SettingsManager.inMemory(
+      {
+        compaction: {
+          enabled: this.config.compactionEnabled,
+          reserveTokens: this.config.compactionReserveTokens,
+          keepRecentTokens: this.config.compactionKeepRecentTokens,
+        },
+        defaultProjectTrust: "always",
+      },
+      { projectTrusted: true },
+    );
+
+    const sessionDir = join(cwd, ".daybreak", "session");
     const { session } = await createAgentSession({
       modelRuntime,
       model,
       tools: ["read", "bash", "edit", "write", "browser"],
       customTools: [browserTool],
-      sessionManager: SessionManager.inMemory(cwd),
+      sessionManager: SessionManager.create(cwd, sessionDir),
       settingsManager,
       cwd,
     });
@@ -142,6 +169,7 @@ export class TaskRunner {
       this.rootSpan?.recordException(error instanceof Error ? error : new Error(String(error)));
     } finally {
       this.stopWallClockTimer();
+      await this.flushCheckpoints();
       await this.session?.dispose();
       this.endTaskSpans();
     }
@@ -157,8 +185,15 @@ export class TaskRunner {
   }
 
   async shutdown(): Promise<void> {
+    await this.flushCheckpoints();
     await closeBrowser();
     await shutdownTelemetry(this.provider);
+  }
+
+  private async flushCheckpoints(): Promise<void> {
+    await Promise.all(this.pendingCheckpoints);
+    this.pendingCheckpoints = [];
+    await this.checkpointStore?.flush();
   }
 
   private wireSafety(): void {
@@ -198,6 +233,8 @@ export class TaskRunner {
             this.abort(`Max cost $${this.config.maxCostUsd.toFixed(2)} reached`);
           }
 
+          this.lastToolCallId = undefined;
+
           if (this.rootContext) {
             this.turnSpan = this.tracer!.startSpan("turn", {}, this.rootContext);
             this.turnSpan.setAttribute("turn.number", current.turns);
@@ -229,6 +266,7 @@ export class TaskRunner {
             pendingToolCalls.delete(event.toolCallId);
             this.metrics.endToolCall(event.toolCallId, event.isError);
             this.endToolSpan(event);
+            this.lastToolCallId = event.toolCallId;
             console.log(
               pc.cyan(`[tool end] ${record.toolName}`),
               event.isError ? pc.red("ERROR") : pc.green("ok"),
@@ -255,6 +293,27 @@ export class TaskRunner {
           this.turnSpan?.end();
           this.turnSpan = undefined;
           this.turnContext = undefined;
+
+          if (!this.abortedReason && this.checkpointStore && this.session?.sessionManager) {
+            const turn = this.metrics.current().turns;
+            const costUsd = this.metrics.current().estimatedCostUsd;
+            const toolCallId = this.lastToolCallId;
+            const promise = this.checkpointStore
+              .createCheckpoint({
+                turn,
+                sessionManager: this.session.sessionManager,
+                toolCallId,
+                costUsd,
+              })
+              .then((checkpoint: Checkpoint) => {
+                console.log(pc.blue(`[checkpoint] turn=${checkpoint.turn} commit=${checkpoint.gitCommit?.slice(0, 7)}`));
+                this.onEvent?.({ type: "checkpoint_created", checkpoint });
+              })
+              .catch((error: unknown) => {
+                console.error("[checkpoint] create failed:", error instanceof Error ? error.message : String(error));
+              });
+            this.pendingCheckpoints.push(promise);
+          }
           break;
         }
         case "compaction_start": {

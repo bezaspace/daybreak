@@ -26,6 +26,8 @@ interface Task {
   prNumber?: number;
   sandboxId?: string;
   keepAliveUntil?: number;
+  headCheckpointId?: string;
+  rootCheckpointId?: string;
 }
 
 interface Screenshot {
@@ -106,6 +108,11 @@ function formatEvent(event: StreamEvent): string {
   if (event.type === "review_complete" || event.type === "review_failed") {
     const data = event.data as { success?: boolean; summary?: string; error?: string };
     return `[${time}] ${event.type}: ${data.success ? "success" : "failed"}${data.summary ? " " + data.summary.slice(0, 120) : ""}${data.error ? ": " + data.error : ""}`;
+  }
+  if (event.type === "checkpoint_created") {
+    const data = event.data as { turn?: number; checkpointId?: string; gitCommit?: string; costUsd?: number };
+    const cost = typeof data.costUsd === "number" ? ` cost=$${data.costUsd.toFixed(4)}` : "";
+    return `[${time}] checkpoint_created: turn=${data.turn ?? "-"} commit=${(data.gitCommit ?? "").slice(0, 7)} checkpoint=${data.checkpointId ?? "-"}${cost}`;
   }
   if (event.type === "commit_pushed") {
     const data = event.data as { prBranch?: string };

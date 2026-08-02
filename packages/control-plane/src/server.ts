@@ -21,6 +21,8 @@ import {
   getEvents,
   ensureWorkspace,
   countTasksByWorkspace,
+  listCheckpoints,
+  getCheckpoint,
   type Task,
   type StreamEvent,
 } from "./db.js";
@@ -729,6 +731,19 @@ app.get("/api/tasks/:id/events", async (c) => {
   await syncEventsFromRedis(id);
   const events = await getEvents(id);
   return c.json(events);
+});
+
+app.get("/api/tasks/:id/checkpoints", async (c) => {
+  const id = c.req.param("id");
+  const checkpoints = await listCheckpoints(id);
+  return c.json(checkpoints);
+});
+
+app.get("/api/checkpoints/:id", async (c) => {
+  const id = c.req.param("id");
+  const checkpoint = await getCheckpoint(id);
+  if (!checkpoint) return c.json({ error: "checkpoint not found" }, 404);
+  return c.json(checkpoint);
 });
 
 app.get("/api/tasks/:id/stream", (c) => {
