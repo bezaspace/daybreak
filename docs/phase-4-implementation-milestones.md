@@ -160,22 +160,22 @@ This is the first demoable time-travel slice: rewind within the same sandbox bef
 
 **What it ships:** The React dashboard visualizes the checkpoint tree, lets the user inspect context at each checkpoint, edit the prompt, and spawn a rewind or a branch.
 
-- [ ] Add `packages/ui/src/TimeTravelView.tsx` (or extend `TraceView.tsx` if the trace and checkpoint trees are merged).
+- [x] Add `packages/ui/src/TimeTravelView.tsx` (or extend `TraceView.tsx` if the trace and checkpoint trees are merged).
   - Fetch checkpoints from `GET /api/tasks/:id/checkpoints`
   - Render a tree by `parent_checkpoint_id`
   - Each node shows turn number, timestamp, tool name, cost, and status
   - Color-code nodes: active path (green), branched (blue), rewound (orange), abandoned (gray)
-- [ ] Add a checkpoint detail panel:
+- [x] Add a checkpoint detail panel:
   - Show the system prompt and the last few messages at that checkpoint
   - Allow editing the user prompt in a text area
   - Show the `git_commit` and `session_ref` (read-only debug metadata)
-- [ ] Add action buttons:
+- [x] Add action buttons:
   - **Rewind here** → calls `POST /api/tasks/:id/rewind` (only enabled if the parent task is still running/pausable)
   - **Branch from here** → calls `POST /api/checkpoints/:checkpointId/fork` with the edited prompt
-- [ ] Update `App.tsx`:
+- [x] Update `App.tsx`:
   - Add a "Time Travel" tab next to "Run", "Trace", "Costs"
   - Surface branch tasks in the "Recent tasks" list with a `branch of <taskId>` label
-- [ ] Add `formatEvent` support for `branch_forked`, `checkpoint_restored`, `branch_promoted`, `branch_abandoned`.
+- [x] Add `formatEvent` support for `branch_forked`, `checkpoint_restored`, `branch_promoted`, `branch_abandoned`.
 
 **Acceptance:**
 - The dashboard shows a checkpoint tree for a completed or running task.

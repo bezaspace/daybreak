@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { CostDashboard } from "./CostDashboard.js";
 import { TraceView } from "./TraceView.js";
+import { TimeTravelView } from "./TimeTravelView.js";
 
 interface StreamEvent {
   id: string;
@@ -28,6 +29,8 @@ interface Task {
   keepAliveUntil?: number;
   headCheckpointId?: string;
   rootCheckpointId?: string;
+  parentTaskId?: string;
+  parentCheckpointId?: string;
 }
 
 interface Screenshot {
@@ -123,8 +126,16 @@ function formatEvent(event: StreamEvent): string {
     return `[${time}] task_rewind: checkpoint=${data.checkpointId ?? "-"} prompt=${(data.prompt ?? "").slice(0, 80)}`;
   }
   if (event.type === "branch_forked") {
-    const data = event.data as { checkpointId?: string; prompt?: string; parentTaskId?: string };
-    return `[${time}] branch_forked: parent=${data.parentTaskId ?? "-"} checkpoint=${data.checkpointId ?? "-"} prompt=${(data.prompt ?? "").slice(0, 80)}`;
+    const data = event.data as { checkpointId?: string; prompt?: string; parentTaskId?: string; childTaskId?: string };
+    return `[${time}] branch_forked: parent=${data.parentTaskId ?? "-"} checkpoint=${data.checkpointId ?? "-"} child=${data.childTaskId?.slice(0, 8) ?? "-"} prompt=${(data.prompt ?? "").slice(0, 80)}`;
+  }
+  if (event.type === "branch_promoted") {
+    const data = event.data as { childTaskId?: string; prUrl?: string };
+    return `[${time}] branch_promoted: child=${data.childTaskId?.slice(0, 8) ?? "-"} pr=${data.prUrl || "-"}`;
+  }
+  if (event.type === "branch_abandoned") {
+    const data = event.data as { childTaskId?: string };
+    return `[${time}] branch_abandoned: child=${data.childTaskId?.slice(0, 8) ?? "-"}`;
   }
   if (event.type === "commit_pushed") {
     const data = event.data as { prBranch?: string };
@@ -162,7 +173,7 @@ export function App() {
   const [config, setConfig] = useState<Config | null>(null);
   const terminalRef = useRef<HTMLPreElement>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [view, setView] = useState<"run" | "trace" | "costs">("run");
+  const [view, setView] = useState<"run" | "trace" | "costs" | "time-travel">("run");
 
   function loadTasks() {
     fetch("/api/tasks")
@@ -369,6 +380,9 @@ export function App() {
           <button type="button" disabled={view === "trace"} onClick={() => setView("trace")} style={{ marginRight: 8 }}>
             Trace
           </button>
+          <button type="button" disabled={view === "time-travel"} onClick={() => setView("time-travel")} style={{ marginRight: 8 }}>
+            Time Travel
+          </button>
           <button type="button" disabled={view === "costs"} onClick={() => setView("costs")}>
             Costs
           </button>
@@ -384,6 +398,8 @@ export function App() {
         />
       )}
       {view === "trace" && taskId && !selectedTask?.traceId && <p>No trace available for this task.</p>}
+
+      {view === "time-travel" && taskId && <TimeTravelView taskId={taskId} />}
 
       {view === "costs" && <CostDashboard />}
 
@@ -426,6 +442,7 @@ export function App() {
         {tasks.map((t) => (
           <li key={t.id}>
             <code>{t.id}</code> — {t.repo} @ {t.branch} · {t.status}
+            {t.parentTaskId && ` · branch of ${t.parentTaskId.slice(0, 8)}`}
             {t.prBranch && ` · ${t.prBranch}`}
             {t.provider ? ` · ${t.provider}` : ""}
             {typeof t.costUsd === "number" ? ` · $${t.costUsd.toFixed(4)}` : ""}
