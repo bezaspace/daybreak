@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
 import { Redis } from "@upstash/redis";
 import { loadConfig } from "@daybreak/shared";
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { appendFile, readFile } from "node:fs/promises";
@@ -115,16 +116,20 @@ async function publishToRedis(taskId: string, event: StreamEvent) {
 
 async function publishEvent(taskId: string, type: string, data: unknown) {
   const event: StreamEvent = { id: `${taskId}-pr`, taskId, type, timestamp: Date.now(), data };
-  await persistEvent(taskId, event);
-  await publishToRedis(taskId, event);
+  try {
+    await persistEvent(taskId, event);
+    await publishToRedis(taskId, event);
+  } catch (error) {
+    console.error(`[control-plane] failed to publish event ${type} for ${taskId}:`, error);
+  }
 }
 
 const tasks = new Map<string, Task>();
 
-function taskFrom(body: { repo: string; branch: string; id?: string; prBranch?: string }): Task {
+function taskFrom(body: { repo: string; branch: string; id?: string; prBranch?: string; triggerSource?: string; githubSender?: string; prNumber?: number; prompt?: string; status?: Task["status"] }): Task {
   const id = body.id ?? randomUUID();
   const prBranch = body.prBranch ?? `daybreak/${id}`;
-  return { id, repo: body.repo, branch: body.branch, prBranch, status: "running", startedAt: Date.now() };
+  return { id, repo: body.repo, branch: body.branch, prBranch, status: body.status ?? "running", startedAt: Date.now(), triggerSource: body.triggerSource, githubSender: body.githubSender, prNumber: body.prNumber, prompt: body.prompt };
 }
 
 async function syncEventsFromRedis(taskId: string) {
@@ -140,61 +145,73 @@ async function syncEventsFromRedis(taskId: string) {
   }
 }
 
-const app = new Hono();
+const DAYBREAK_MENTION = /(^|\s)@daybreak-bot(\b|$)/i;
 
-app.use("/api/*", cors({ origin: "*" }));
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+}
 
-app.get("/", (c) => c.text("Daybreak control plane"));
+function hasMention(text: string): boolean {
+  return DAYBREAK_MENTION.test(text);
+}
 
-const config = loadConfig();
+function matchesAllowlist(repoFullName: string, pattern: string): boolean {
+  const [owner, repoName] = repoFullName.split("/");
+  const [pOwner, pRepo] = pattern.trim().split("/");
+  if (!owner || !pOwner) return false;
+  if (pOwner.toLowerCase() !== owner.toLowerCase()) return false;
+  if (pRepo === "*") return true;
+  return pRepo?.toLowerCase() === repoName?.toLowerCase();
+}
 
-app.get("/api/config", (c) => {
-  return c.json({
-    maxTurns: config.maxTurns,
-    maxWallClockMinutes: config.maxWallClockMinutes,
-    maxCostUsd: config.maxCostUsd,
-    compactionEnabled: config.compactionEnabled,
-    e2bTemplate: config.e2bTemplate,
-    provider: config.llm.provider,
-  });
-});
+function isRepoAllowed(repoFullName: string, allowlist?: string): boolean {
+  if (!allowlist) return false;
+  const patterns = allowlist.split(",").map((p) => p.trim()).filter(Boolean);
+  if (patterns.length === 0) return false;
+  return patterns.some((pattern) => matchesAllowlist(repoFullName, pattern));
+}
 
-app.get("/api/tasks", async (c) => {
-  const dbTasks = await getTasks();
-  const merged = new Map<string, Task>();
-  for (const task of dbTasks) {
-    merged.set(task.id, task);
+function verifyWebhookSignature(secret: string, body: Buffer, signature: string): boolean {
+  const expected = `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
+  const provided = signature.trim();
+  if (expected.length !== provided.length) return false;
+  return timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
+}
+
+function stripMention(text: string): string {
+  return text.replace(/(^|\s)@daybreak-bot(\b|$)/gi, " ").replace(/\s{2,}/g, " ").trim();
+}
+
+function buildIssuePrompt(repoUrl: string, branch: string, issue: unknown, commentBody: string): string {
+  const issueTitle = (issue && typeof issue === "object" && "title" in issue && typeof issue.title === "string") ? issue.title : "No title";
+  const issueBody = (issue && typeof issue === "object" && "body" in issue && typeof issue.body === "string") ? `\n\nBody:\n${issue.body}` : "";
+  return `A GitHub issue was opened in ${repoUrl} (branch: ${branch}):\n\nTitle: ${issueTitle}${issueBody}\n\nA user then commented:\n${commentBody}\n\nPlease investigate the issue, make the minimal fix, run the tests until they pass, then commit the fix and open a pull request.`;
+}
+
+function buildReviewPrompt(repoUrl: string, prNumber: number, baseBranch: string, headBranch: string, body: string): string {
+  return `A reviewer left feedback on PR #${prNumber} in ${repoUrl} (base: ${baseBranch}, head: ${headBranch}):\n\n${body}\n\nPlease address the feedback on the existing PR branch ${headBranch}, run the tests, and push a follow-up commit.`;
+}
+
+async function isDuplicateDelivery(deliveryId: string): Promise<boolean> {
+  try {
+    const redis = getRedis();
+    const key = `daybreak:webhook:${deliveryId}`;
+    const stored = await redis.set(key, "1", { nx: true, ex: 60 * 60 * 24 });
+    return stored === null;
+  } catch (error) {
+    console.error(`[control-plane] failed to check webhook delivery idempotency:`, error);
+    return false;
   }
-  for (const task of tasks.values()) {
-    merged.set(task.id, task);
-  }
-  return c.json(Array.from(merged.values()));
-});
+}
 
-app.post("/api/tasks", async (c) => {
-  const body = await c.req.json<{
-    repo?: string;
-    branch?: string;
-    prompt?: string;
-    maxTurns?: number;
-    maxCostUsd?: number;
-    maxWallClockMinutes?: number;
-  }>().catch(() => ({}) as { repo?: string; branch?: string; prompt?: string; maxTurns?: number; maxCostUsd?: number; maxWallClockMinutes?: number });
-  const repo = body.repo;
-  const branch = body.branch || "main";
-  const prompt = body.prompt;
-
-  if (!repo) {
-    return c.json({ error: "repo is required" }, 400);
-  }
-
-  const taskMaxTurns = body.maxTurns ?? config.maxTurns;
-  const taskMaxCostUsd = body.maxCostUsd ?? config.maxCostUsd;
-  const taskMaxWallClockMinutes = body.maxWallClockMinutes ?? config.maxWallClockMinutes;
-
-  const task = taskFrom({ repo, branch });
+async function spawnTask(spec: { repo: string; branch: string; prBranch?: string; prompt?: string; triggerSource?: string; githubSender?: string; prNumber?: number; maxTurns?: number; maxCostUsd?: number; maxWallClockMinutes?: number }): Promise<Task> {
+  const task = taskFrom({ ...spec, status: "running" });
   tasks.set(task.id, task);
   await persistTask(task);
+
+  const taskMaxTurns = spec.maxTurns ?? config.maxTurns;
+  const taskMaxCostUsd = spec.maxCostUsd ?? config.maxCostUsd;
+  const taskMaxWallClockMinutes = spec.maxWallClockMinutes ?? config.maxWallClockMinutes;
 
   const env: NodeJS.ProcessEnv = {
     ...process.env,
@@ -218,14 +235,14 @@ app.post("/api/tasks", async (c) => {
     "--filter",
     "agent-runner",
     "sandbox",
-    `--repo=${repo}`,
-    `--branch=${branch}`,
+    `--repo=${task.repo}`,
+    `--branch=${task.branch}`,
     `--task-id=${task.id}`,
     `--template=${config.e2bTemplate || "base"}`,
   ];
-  if (prompt) {
-    sandboxArgs.push(`--prompt=${prompt}`);
-    env.TASK_PROMPT = prompt;
+  if (spec.prompt) {
+    sandboxArgs.push(`--prompt=${spec.prompt}`);
+    env.TASK_PROMPT = spec.prompt;
   }
 
   ensureLogDir();
@@ -281,8 +298,203 @@ app.post("/api/tasks", async (c) => {
     }
   });
 
+  return task;
+}
+
+async function createPendingTask(spec: { repo: string; branch: string; prBranch: string; prompt?: string; triggerSource: string; githubSender?: string; prNumber?: number }): Promise<Task> {
+  const task = taskFrom({ ...spec, status: "pending" });
+  tasks.set(task.id, task);
+  await persistTask(task);
+  await publishEvent(task.id, "task_pending", { triggerSource: task.triggerSource, githubSender: task.githubSender, prNumber: task.prNumber });
+  return task;
+}
+
+const config = loadConfig();
+
+const app = new Hono();
+
+app.use("/api/*", cors({ origin: "*" }));
+
+app.get("/", (c) => c.text("Daybreak control plane"));
+
+app.get("/api/config", (c) => {
+  return c.json({
+    maxTurns: config.maxTurns,
+    maxWallClockMinutes: config.maxWallClockMinutes,
+    maxCostUsd: config.maxCostUsd,
+    compactionEnabled: config.compactionEnabled,
+    e2bTemplate: config.e2bTemplate,
+    provider: config.llm.provider,
+  });
+});
+
+app.get("/api/tasks", async (c) => {
+  const dbTasks = await getTasks();
+  const merged = new Map<string, Task>();
+  for (const task of dbTasks) {
+    merged.set(task.id, task);
+  }
+  for (const task of tasks.values()) {
+    merged.set(task.id, task);
+  }
+  return c.json(Array.from(merged.values()));
+});
+
+app.post("/api/tasks", async (c) => {
+  const body = await c.req.json<{
+    repo?: string;
+    branch?: string;
+    prompt?: string;
+    maxTurns?: number;
+    maxCostUsd?: number;
+    maxWallClockMinutes?: number;
+  }>().catch(() => ({}) as { repo?: string; branch?: string; prompt?: string; maxTurns?: number; maxCostUsd?: number; maxWallClockMinutes?: number });
+  const repo = body.repo;
+  const branch = body.branch || "main";
+  const prompt = body.prompt;
+
+  if (!repo) {
+    return c.json({ error: "repo is required" }, 400);
+  }
+
+  const task = await spawnTask({
+    repo,
+    branch,
+    prompt,
+    triggerSource: "dashboard",
+    maxTurns: body.maxTurns,
+    maxCostUsd: body.maxCostUsd,
+    maxWallClockMinutes: body.maxWallClockMinutes,
+  });
   return c.json({ taskId: task.id, repo, branch, status: task.status });
 });
+
+app.post(
+  "/api/webhooks/github",
+  bodyLimit({ maxSize: 1 * 1024 * 1024, onError: (c) => c.json({ error: "payload too large" }, 413) }),
+  async (c) => {
+    const signature = c.req.header("x-hub-signature-256") || "";
+    const event = c.req.header("x-github-event") || "";
+    const deliveryId = c.req.header("x-github-delivery") || "";
+
+    if (!config.githubWebhookSecret) {
+      return c.json({ error: "webhook secret not configured" }, 500);
+    }
+    if (!signature) {
+      return c.json({ error: "missing X-Hub-Signature-256" }, 400);
+    }
+    if (!deliveryId) {
+      return c.json({ error: "missing X-GitHub-Delivery" }, 400);
+    }
+
+    const raw = Buffer.from(await c.req.arrayBuffer());
+    if (!verifyWebhookSignature(config.githubWebhookSecret, raw, signature)) {
+      return c.json({ error: "invalid signature" }, 401);
+    }
+
+    if (await isDuplicateDelivery(deliveryId)) {
+      return c.json({ ok: true, note: "duplicate delivery" }, 200);
+    }
+
+    const payload = JSON.parse(raw.toString("utf-8")) as Record<string, unknown>;
+    const repository = asRecord(payload.repository);
+    const repoFullName = typeof repository?.full_name === "string" ? repository.full_name : undefined;
+    const repoUrl = typeof repository?.clone_url === "string" ? repository.clone_url : undefined;
+
+    if (!repoFullName || !repoUrl) {
+      return c.json({ error: "missing repository" }, 400);
+    }
+
+    if (!isRepoAllowed(repoFullName, config.githubWebhookRepoAllowlist)) {
+      console.warn(`[control-plane] webhook from disallowed repo: ${repoFullName}`);
+      return c.json({ error: "repository not in allowlist" }, 403);
+    }
+
+    const sender = typeof payload.sender === "object" && payload.sender !== null ? asRecord(payload.sender)?.login : undefined;
+
+    switch (event) {
+      case "ping": {
+        return c.json({ ok: true, event: "ping" }, 200);
+      }
+      case "check_run": {
+        return c.json({ ok: true, event: "check_run" }, 200);
+      }
+      case "issue_comment": {
+        const action = typeof payload.action === "string" ? payload.action : "";
+        if (action !== "created") {
+          return c.json({ ok: true, note: "ignored non-created issue_comment" }, 200);
+        }
+        const issue = asRecord(payload.issue);
+        if (!issue) {
+          return c.json({ error: "missing issue" }, 400);
+        }
+        if ("pull_request" in issue) {
+          return c.json({ ok: true, note: "ignored issue_comment on pull request" }, 200);
+        }
+        const comment = asRecord(payload.comment);
+        const commentBody = typeof comment?.body === "string" ? comment.body : "";
+        if (!hasMention(commentBody)) {
+          return c.json({ ok: true, note: "no @daybreak-bot mention" }, 200);
+        }
+        const defaultBranch = typeof repository?.default_branch === "string" ? repository.default_branch : "main";
+        const issueTitle = typeof issue.title === "string" ? issue.title : "";
+        const issueBody = typeof issue.body === "string" ? issue.body : "";
+        const prompt = buildIssuePrompt(repoUrl, defaultBranch, { title: issueTitle, body: issueBody }, stripMention(commentBody));
+        const task = await spawnTask({ repo: repoUrl, branch: defaultBranch, prompt, triggerSource: "issue_comment", githubSender: typeof sender === "string" ? sender : undefined });
+        return c.json({ taskId: task.id, repo: repoFullName, branch: defaultBranch, status: task.status }, 202);
+      }
+      case "pull_request_review_comment": {
+        const action = typeof payload.action === "string" ? payload.action : "";
+        if (action !== "created") {
+          return c.json({ ok: true, note: "ignored non-created pull_request_review_comment" }, 200);
+        }
+        const comment = asRecord(payload.comment);
+        const commentBody = typeof comment?.body === "string" ? comment.body : "";
+        if (!hasMention(commentBody)) {
+          return c.json({ ok: true, note: "no @daybreak-bot mention" }, 200);
+        }
+        const pullRequest = asRecord(payload.pull_request);
+        if (!pullRequest) {
+          return c.json({ error: "missing pull_request" }, 400);
+        }
+        const base = asRecord(pullRequest.base);
+        const head = asRecord(pullRequest.head);
+        const baseRef = typeof base?.ref === "string" ? base.ref : "main";
+        const headRef = typeof head?.ref === "string" ? head.ref : `daybreak/${randomUUID()}`;
+        const prNumber = typeof pullRequest.number === "number" ? pullRequest.number : 0;
+        const prompt = buildReviewPrompt(repoUrl, prNumber, baseRef, headRef, stripMention(commentBody));
+        const task = await createPendingTask({ repo: repoUrl, branch: baseRef, prBranch: headRef, prompt, triggerSource: "review_comment", githubSender: typeof sender === "string" ? sender : undefined, prNumber });
+        return c.json({ taskId: task.id, repo: repoFullName, branch: baseRef, prBranch: headRef, status: task.status }, 202);
+      }
+      case "pull_request_review": {
+        const action = typeof payload.action === "string" ? payload.action : "";
+        if (action !== "submitted") {
+          return c.json({ ok: true, note: "ignored non-submitted pull_request_review" }, 200);
+        }
+        const review = asRecord(payload.review);
+        const reviewBody = typeof review?.body === "string" ? review.body : "";
+        if (!reviewBody || !hasMention(reviewBody)) {
+          return c.json({ ok: true, note: "no @daybreak-bot mention" }, 200);
+        }
+        const pullRequest = asRecord(payload.pull_request);
+        if (!pullRequest) {
+          return c.json({ error: "missing pull_request" }, 400);
+        }
+        const base = asRecord(pullRequest.base);
+        const head = asRecord(pullRequest.head);
+        const baseRef = typeof base?.ref === "string" ? base.ref : "main";
+        const headRef = typeof head?.ref === "string" ? head.ref : `daybreak/${randomUUID()}`;
+        const prNumber = typeof pullRequest.number === "number" ? pullRequest.number : 0;
+        const prompt = buildReviewPrompt(repoUrl, prNumber, baseRef, headRef, stripMention(reviewBody));
+        const task = await createPendingTask({ repo: repoUrl, branch: baseRef, prBranch: headRef, prompt, triggerSource: "review_comment", githubSender: typeof sender === "string" ? sender : undefined, prNumber });
+        return c.json({ taskId: task.id, repo: repoFullName, branch: baseRef, prBranch: headRef, status: task.status }, 202);
+      }
+      default: {
+        return c.json({ ok: true, note: `unhandled event: ${event}` }, 200);
+      }
+    }
+  },
+);
 
 app.get("/api/tasks/:id", async (c) => {
   const id = c.req.param("id");

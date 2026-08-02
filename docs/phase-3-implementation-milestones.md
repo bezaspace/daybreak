@@ -32,7 +32,8 @@
 - Parse payload fields: `repository.clone_url`, `repository.full_name`, `repository.default_branch`, `pull_request.head.ref`, `pull_request.base.ref`, `pull_request.number`, `issue.title`, `issue.body`, `comment.body`, `sender.login`, and `X-GitHub-Delivery`.
 - Add `GITHUB_WEBHOOK_SECRET` and `GITHUB_WEBHOOK_REPO_ALLOWLIST` to `DaybreakConfig` / `.env.example`.
 - Add idempotency: record `X-GitHub-Delivery` in Redis with a 24-hour TTL so retries do not duplicate tasks.
-- Add `triggerSource` (`"dashboard" | "issue_comment" | "review_comment"`), `githubSender`, and `repo` to `Task` / `PersistedTask` and `db.ts`.
+- Add `triggerSource` (`"dashboard" | "issue_comment" | "review_comment"`), `githubSender`, `prNumber`, and `prompt` to `Task` / `PersistedTask` and `db.ts`.
+- Add the corresponding columns to the Supabase `tasks` table (`supabase/migrations/20260802_add_phase3_task_fields.sql`).
 
 **Acceptance:**
 - `cloudflared tunnel --url http://localhost:8787` exposes the local control plane and a real `issue_comment` webhook is accepted.

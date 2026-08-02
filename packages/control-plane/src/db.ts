@@ -14,6 +14,10 @@ export interface PersistedTask {
   trace_id?: string | null;
   provider?: string | null;
   cost_usd?: number | null;
+  trigger_source?: string | null;
+  github_sender?: string | null;
+  pr_number?: number | null;
+  prompt?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -33,7 +37,7 @@ export interface Task {
   repo: string;
   branch: string;
   prBranch: string;
-  status: "running" | "complete" | "failed";
+  status: "pending" | "running" | "complete" | "failed";
   startedAt: number;
   endedAt?: number;
   exitCode?: number;
@@ -41,6 +45,10 @@ export interface Task {
   traceId?: string;
   provider?: string;
   costUsd?: number;
+  triggerSource?: string;
+  githubSender?: string;
+  prNumber?: number;
+  prompt?: string;
 }
 
 export interface StreamEvent {
@@ -73,6 +81,10 @@ function toTask(row: PersistedTask): Task {
     traceId: row.trace_id ?? undefined,
     provider: row.provider ?? undefined,
     costUsd: row.cost_usd ?? undefined,
+    triggerSource: row.trigger_source ?? undefined,
+    githubSender: row.github_sender ?? undefined,
+    prNumber: row.pr_number ?? undefined,
+    prompt: row.prompt ?? undefined,
   };
 }
 
@@ -92,6 +104,10 @@ export async function persistTask(task: Task): Promise<boolean> {
     trace_id: task.traceId ?? null,
     provider: task.provider ?? null,
     cost_usd: task.costUsd ?? null,
+    trigger_source: task.triggerSource ?? null,
+    github_sender: task.githubSender ?? null,
+    pr_number: task.prNumber ?? null,
+    prompt: task.prompt ?? null,
     updated_at: new Date().toISOString(),
   });
   if (error) {
