@@ -65,34 +65,34 @@ Phase 0 proved the *concept* of Pi session serialization was accessible through 
 
 This is the cheap, deterministic filesystem rewind strategy recommended by `TIME_TRAVEL.md`. It avoids expensive per-turn E2B snapshots while still allowing rewind within the same sandbox and, with a small amount of extra work, branching to a fresh sandbox.
 
-- [ ] Add `packages/agent-runner/src/checkpoint.ts` with a `CheckpointStore` class:
+- [x] Add `packages/agent-runner/src/checkpoint.ts` with a `CheckpointStore` class:
   - `createCheckpoint(turn, gitCommit, sessionRef, parentCheckpointId, toolCallId, costUsd?)`
   - `getCheckpoint(id)`
   - `listCheckpoints(taskId)`
   - `getLatestCheckpoint(taskId)`
   - `setCheckpointStatus(id, status)`
-- [ ] Implement a JSONL session-store writer in `packages/agent-runner/src/session-store.ts`:
+- [x] Implement a JSONL session-store writer in `packages/agent-runner/src/session-store.ts`:
   - Serialize `AgentSession` state after each `turn_start` or `agent_end` boundary
   - Write to `${WORK_DIR}/.daybreak/sessions/<taskId>/<turn>.jsonl` inside the sandbox
   - Upload to a durable location (Supabase storage or a `session_snapshots` table) so it survives sandbox death and can be restored in a fork
-- [ ] Modify `packages/agent-runner/src/run-task.ts`:
+- [x] Modify `packages/agent-runner/src/run-task.ts`:
   - After each `tool_execution_end` (and optionally at `turn_start`/`agent_end` for non-mutating turns), create a checkpoint commit with message `daybreak-checkpoint:<taskId>:<turn>`
   - Tag the commit with `daybreak/checkpoint/<taskId>/<turn>` so it is reachable even if the branch moves
   - Push checkpoint tags to origin only when needed for cross-sandbox fork (configurable; default off until M4)
   - Call `CheckpointStore.createCheckpoint(...)` and emit a `checkpoint_created` stream event
-- [ ] Modify `packages/agent-runner/src/session.ts` `TaskRunner`:
+- [x] Modify `packages/agent-runner/src/session.ts` `TaskRunner`:
   - Wire `checkpoint_created` events into the event subscriber
   - Serialize session state at the end of each turn and pass it to `CheckpointStore`
   - Record checkpoint `costUsd` from the running `MetricsCollector`
-- [ ] Add `GET /api/tasks/:id/checkpoints` to the control plane and update `packages/control-plane/src/db.ts` with checkpoint persistence/query helpers.
-- [ ] Update `packages/control-plane/src/server.ts` `Task`/`PersistedTask` to track `headCheckpointId` and `rootCheckpointId`.
-- [ ] Add checkpoint stream events to `packages/ui/src/App.tsx` `formatEvent`.
+- [x] Add `GET /api/tasks/:id/checkpoints` to the control plane and update `packages/control-plane/src/db.ts` with checkpoint persistence/query helpers.
+- [x] Update `packages/control-plane/src/server.ts` `Task`/`PersistedTask` to track `headCheckpointId` and `rootCheckpointId`.
+- [x] Add checkpoint stream events to `packages/ui/src/App.tsx` `formatEvent`.
 
 **Acceptance:**
-- Run a task; the `checkpoints` table contains one row per turn with a non-null `git_commit`.
-- `git tag -l 'daybreak/checkpoint/*'` inside the sandbox shows tags.
-- The dashboard stream renders `checkpoint_created` events with turn number and cost.
-- `pnpm lint && pnpm typecheck && pnpm test` pass.
+- [x] Run a task; the `checkpoints` table contains one row per turn with a non-null `git_commit`.
+- [x] `git tag -l 'daybreak/checkpoint/*'` inside the sandbox shows tags.
+- [x] The dashboard stream renders `checkpoint_created` events with turn number and cost.
+- [x] `pnpm lint && pnpm typecheck && pnpm test` pass.
 
 ---
 
