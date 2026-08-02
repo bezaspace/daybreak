@@ -49,6 +49,12 @@ describe("CheckpointStore", () => {
     const sessionRef = cp1.sessionRef!;
     expect(sessionRef.startsWith("local:") || sessionRef.startsWith("snapshot:")).toBe(true);
 
+    const tagName = `daybreak/checkpoint/t1/1`;
+    const tags = execSync("git tag", { cwd }).toString();
+    expect(tags).toContain(tagName);
+    const tagCommit = execSync(`git rev-list -n1 ${tagName}`, { cwd }).toString().trim();
+    expect(tagCommit).toBe(cp1.gitCommit);
+
     writeFileSync(join(cwd, "a.txt"), "turn2");
     const cp2 = await checkpointStore.createCheckpoint({ turn: 2, sessionManager });
     expect(cp2.parentCheckpointId).toBe(cp1.id);

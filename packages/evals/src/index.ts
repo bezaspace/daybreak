@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { loadConfig } from "@daybreak/shared";
-import { TaskRunner } from "@daybreak/agent-runner";
+import { TaskRunner, CheckpointStore, SessionStore } from "@daybreak/agent-runner";
 import pc from "picocolors";
-import { readdir } from "node:fs/promises";
+import { readdir, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -67,9 +67,12 @@ async function main() {
   for (const evalCase of fixtures) {
     console.log(pc.bold(`--- ${evalCase.name} ---`));
     const runner = new TaskRunner(config);
+    const taskId = `eval-${evalCase.name}`;
 
     try {
+      await rm(join(evalCase.fixture, ".daybreak"), { recursive: true, force: true }).catch(() => {});
       const result = await runner.run({
+        taskId,
         prompt: evalCase.prompt,
         cwd: evalCase.fixture,
         autoApprove: true,
@@ -107,6 +110,29 @@ async function main() {
         } else if (config.langfusePublicKey && config.langfuseSecretKey) {
           console.log(pc.yellow("Could not verify trace in Langfuse (may still be processing)"));
         }
+
+        // Verify time-travel checkpoint artifacts.
+        const sessionStore = new SessionStore({ taskId, cwd: evalCase.fixture });
+        const checkpointStore = new CheckpointStore({ taskId, cwd: evalCase.fixture, sessionStore });
+        const checkpoints = await checkpointStore.listCheckpoints(taskId);
+        if (checkpoints.length === 0) {
+          console.log(pc.red("FAIL: no checkpoints found"));
+          failed++;
+          continue;
+        }
+        const last = checkpoints[checkpoints.length - 1];
+        if (!last.gitCommit || !last.sessionRef) {
+          console.log(pc.red(`FAIL: last checkpoint missing gitCommit or sessionRef: ${last.id}`));
+          failed++;
+          continue;
+        }
+        if (typeof last.costUsd !== "number") {
+          console.log(pc.red(`FAIL: last checkpoint has no costUsd: ${last.id}`));
+          failed++;
+          continue;
+        }
+        console.log(pc.green(`Checkpoints verified: ${checkpoints.length} checkpoint(s), last=${last.gitCommit.slice(0, 7)}`));
+
         passed++;
       } else {
         failed++;

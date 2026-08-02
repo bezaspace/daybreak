@@ -163,6 +163,46 @@ describe("control-plane webhooks", () => {
     expect(json.note).toContain("no @daybreak-bot mention");
   });
 
+describe("time-travel endpoints", () => {
+    it("rejects a fork request without a prompt", async () => {
+      const res = await app.request("/api/checkpoints/does-not-exist/fork", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 404 when forking a nonexistent checkpoint", async () => {
+      const res = await app.request("/api/checkpoints/does-not-exist/fork", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: "try again" }),
+      });
+      expect(res.status).toBe(404);
+    });
+
+    it("rejects a rewind request without checkpointId or prompt", async () => {
+      const res = await app.request("/api/tasks/does-not-exist/rewind", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 404 when rewinding a nonexistent task", async () => {
+      const res = await app.request("/api/tasks/does-not-exist/rewind", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ checkpointId: "cp-123", prompt: "retry" }),
+      });
+      expect(res.status).toBe(404);
+    });
+
+    it("rejects abandoning a nonexistent task", async () => {
+      const res = await app.request("/api/tasks/does-not-exist/abandon", { method: "POST" });
+      expect(res.status).toBe(404);
+    });
+
+    it("rejects promoting a nonexistent task", async () => {
+      const res = await app.request("/api/tasks/does-not-exist/promote", { method: "POST" });
+      expect(res.status).toBe(404);
+    });
+  });
+
   it("creates a review-iteration task from a synthetic pull_request_review_comment", async () => {
     const body = {
       action: "created",

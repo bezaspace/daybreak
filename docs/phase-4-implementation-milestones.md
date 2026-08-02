@@ -215,31 +215,31 @@ This is the first demoable time-travel slice: rewind within the same sandbox bef
 
 **What it ships:** Phase 4 is repeatable, budgeted, and marked complete.
 
-- [ ] Extend `packages/evals/src/index.ts` and `e2e.ts`:
+- [x] Extend `packages/evals/src/index.ts` and `e2e.ts`:
   - Add a `time-travel` fixture (or extend `failing-sum`) that:
     - Runs the task for a few turns
     - Calls the rewind or fork API
     - Asserts the checkpoint/branch task is created and completes
     - Asserts the promoted PR passes CI (or that the branch succeeds within the local eval)
   - Verify `traceId`, `costUsd`, and `parentCheckpointId` are present on branched tasks
-- [ ] Add unit tests for:
+- [x] Add unit tests for:
   - `CheckpointStore` create/list/get
   - git checkpoint commit/tag creation
   - session store JSONL round-trip
   - control-plane fork/rewind endpoint validation
-- [ ] Update `docs/COST_BUDGET.md`:
+- [x] Update `docs/COST_BUDGET.md`:
   - Per-checkpoint git commit cost (negligible)
   - Per-turn session JSONL storage cost in Supabase
   - E2B snapshot cost (if Strategy A) or re-install cost (if Strategy B)
   - Impact of parallel branches on `MAX_COST_USD` and `MAX_TURNS` (branches get their own budgets)
-- [ ] Update `.env.example` with Phase 4 variables:
+- [x] Update `.env.example` with Phase 4 variables:
   - `DAYBREAK_CHECKPOINT_INTERVAL` (`"turn" | "tool"`, default `"tool"`)
   - `DAYBREAK_SESSION_STORE_BACKEND` (`"file" | "supabase"`, default `"supabase"`)
   - `DAYBREAK_FORK_STRATEGY` (`"auto" | "snapshot" | "git-reinstall"`, default `"auto"`)
   - `DAYBREAK_MAX_CHECKPOINTS_PER_TASK` (default 100)
-- [ ] Update `decisions.md` with the final checkpoint/fork strategy and any Pi serialization limitations.
-- [ ] Update `roadmap.md` Phase 4 checklist to mark items complete.
-- [ ] Run `pnpm lint && pnpm typecheck && pnpm test && pnpm --filter agent-runner build:bundle && pnpm --filter ui build`.
+- [x] Update `decisions.md` with the final checkpoint/fork strategy and any Pi serialization limitations.
+- [x] Update `roadmap.md` Phase 4 checklist to mark items complete.
+- [x] Run `pnpm lint && pnpm typecheck && pnpm test && pnpm --filter agent-runner build:bundle && pnpm --filter ui build`.
 
 **Acceptance:**
 - `pnpm eval` includes a time-travel test.

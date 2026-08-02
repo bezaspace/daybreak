@@ -1066,7 +1066,8 @@ app.post("/api/checkpoints/:checkpointId/fork", async (c) => {
   const checkpointId = c.req.param("checkpointId");
   const body = await c.req.json().catch(() => ({}));
   const prompt = (body as Record<string, unknown>).prompt;
-  const strategy = (body as Record<string, unknown>).strategy ?? "git-reinstall";
+  const rawStrategy = (body as Record<string, unknown>).strategy ?? config.forkStrategy ?? "git-reinstall";
+  const strategy = rawStrategy === "auto" ? "git-reinstall" : rawStrategy;
   const snapshotId = (body as Record<string, unknown>).snapshotId;
   if (typeof prompt !== "string") {
     return c.json({ error: "prompt is required" }, 400);

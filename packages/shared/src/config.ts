@@ -34,6 +34,10 @@ export interface DaybreakConfig {
   langfusePublicKey?: string;
   langfuseSecretKey?: string;
   langfuseBaseUrl?: string;
+  checkpointInterval?: "turn" | "tool";
+  sessionStoreBackend?: "file" | "supabase";
+  forkStrategy?: "auto" | "snapshot" | "git-reinstall";
+  maxCheckpointsPerTask?: number;
 }
 
 const DEFAULT_MAX_TURNS = 40;
@@ -43,6 +47,10 @@ const DEFAULT_PROTECTED_BRANCHES = ["main", "master"];
 const DEFAULT_COMPACTION_ENABLED = true;
 const DEFAULT_COMPACTION_RESERVE_TOKENS = 4000;
 const DEFAULT_COMPACTION_KEEP_RECENT_TOKENS = 8000;
+const DEFAULT_CHECKPOINT_INTERVAL: "turn" | "tool" = "tool";
+const DEFAULT_SESSION_STORE_BACKEND: "file" | "supabase" = "supabase";
+const DEFAULT_FORK_STRATEGY: "auto" | "snapshot" | "git-reinstall" = "auto";
+const DEFAULT_MAX_CHECKPOINTS_PER_TASK = 100;
 
 export const DEFAULT_DENYLIST_PATTERNS: string[] = [
   ".env",
@@ -156,6 +164,10 @@ export function loadConfig(envPath?: string): DaybreakConfig {
     langfusePublicKey: get("LANGFUSE_PUBLIC_KEY"),
     langfuseSecretKey: get("LANGFUSE_SECRET_KEY"),
     langfuseBaseUrl: get("LANGFUSE_BASE_URL"),
+    checkpointInterval: (get("DAYBREAK_CHECKPOINT_INTERVAL") as "turn" | "tool") || DEFAULT_CHECKPOINT_INTERVAL,
+    sessionStoreBackend: (get("DAYBREAK_SESSION_STORE_BACKEND") as "file" | "supabase") || DEFAULT_SESSION_STORE_BACKEND,
+    forkStrategy: (get("DAYBREAK_FORK_STRATEGY") as "auto" | "snapshot" | "git-reinstall") || DEFAULT_FORK_STRATEGY,
+    maxCheckpointsPerTask: parseIntEnv("DAYBREAK_MAX_CHECKPOINTS_PER_TASK", DEFAULT_MAX_CHECKPOINTS_PER_TASK),
   };
 }
 

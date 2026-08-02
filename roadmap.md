@@ -2,7 +2,7 @@
 
 **Open-source, cloud-native, autonomous AI software engineer platform with time-travel state branching and full OpenTelemetry lineage.**
 
-> **Status:** Phase 1 complete — local MVP dashboard → E2B sandbox → live stream → PR with CI green, branch not `main`, `MAX_TURNS` enforced, and `.env` not read.  
+> **Status:** Phase 4 complete — per-turn git checkpoints, Pi session JSONL snapshots, same-sandbox rewind, cross-sandbox fork with `git-reinstall`/`snapshot` strategies, time-travel dashboard UI, and branch promote/abandon converged.  
 > **Started:** 2026-08-01 (planning)  
 > **Document version:** 2.1
 
@@ -149,16 +149,18 @@ Progress is measured by the completion of demoable vertical slices and objective
 
 **Goal:** Rewind the agent's execution tree to any step, edit the context or prompt, and spawn a parallel attempt branch in a separate sandbox. This phase depends on the feasibility report from Phase 0.
 
-- [ ] 7.1. **Checkpoint model:** A checkpoint is `{ turn, timestamp, piStateRef, fsSnapshotId, parentCheckpointId }` stored in Supabase. One checkpoint per turn.
-- [ ] 7.2. **Filesystem rewind:** Use the strategy proven in Phase 0 — either E2B snapshots per turn or a per-turn `git commit` + dependency-cache fallback.
-- [ ] 7.3. **Agent-state rewind:** Serialize Pi session at each checkpoint and reload/fork from `piStateRef`.
-- [ ] 7.4. **Parallel attempt branching:** Fork the sandbox and fork the Pi session from checkpoint `N`.
-- [ ] 7.5. **Branch UI:** In the dashboard. A tree visualization of checkpoints. User clicks a node, edits context/instruction, clicks "Branch". A new sandbox is spun from the snapshot, Pi state is restored and forked, and the new branch begins executing live.
-- [ ] 7.6. Implement the checkpoint manager in the agent runner: after each tool turn, snapshot filesystem and serialize Pi state.
-- [ ] 7.7. Implement the fork endpoint in the control plane: given `checkpointId`, provision a sandbox from `fsSnapshotId` and restore `piStateRef`.
-- [ ] 7.8. Build the UI tree component. Allow context-window editing before spawning a branch.
-- [ ] 7.9. Handle branch convergence: allow the user to promote a branch to become the primary PR, abandoning or pausing others.
-- [ ] 7.10. **Exit criteria:** Run a task to completion. Rewind to step 3. Edit the prompt. Click "Branch". Watch a second, parallel sandbox execute a different path. Promote the second branch to a new PR.
+> **Implementation breakdown:** [docs/phase-4-implementation-milestones.md](docs/phase-4-implementation-milestones.md)
+
+- [x] 7.1. **Checkpoint model:** A checkpoint is `{ turn, timestamp, piStateRef, fsSnapshotId, parentCheckpointId }` stored in Supabase. One checkpoint per turn.
+- [x] 7.2. **Filesystem rewind:** Use the strategy proven in Phase 0 — either E2B snapshots per turn or a per-turn `git commit` + dependency-cache fallback.
+- [x] 7.3. **Agent-state rewind:** Serialize Pi session at each checkpoint and reload/fork from `piStateRef`.
+- [x] 7.4. **Parallel attempt branching:** Fork the sandbox and fork the Pi session from checkpoint `N`.
+- [x] 7.5. **Branch UI:** In the dashboard. A tree visualization of checkpoints. User clicks a node, edits context/instruction, clicks "Branch". A new sandbox is spun from the snapshot, Pi state is restored and forked, and the new branch begins executing live.
+- [x] 7.6. Implement the checkpoint manager in the agent runner: after each tool turn, snapshot filesystem and serialize Pi state.
+- [x] 7.7. Implement the fork endpoint in the control plane: given `checkpointId`, provision a sandbox from `fsSnapshotId` and restore `piStateRef`.
+- [x] 7.8. Build the UI tree component. Allow context-window editing before spawning a branch.
+- [x] 7.9. Handle branch convergence: allow the user to promote a branch to become the primary PR, abandoning or pausing others.
+- [x] 7.10. **Exit criteria:** Run a task to completion. Rewind to step 3. Edit the prompt. Click "Branch". Watch a second, parallel sandbox execute a different path. Promote the second branch to a new PR.
 
 ---
 

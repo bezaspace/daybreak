@@ -107,3 +107,35 @@ The agent runner enforces three hard limits by default:
 | Max cost per task | $0.50 USD | `MAX_COST_USD` |
 
 These are intentionally tight. Raise them only after measuring real usage in your account.
+
+## Phase 4 time-travel budget impact
+
+### Per-checkpoint costs
+
+- **Git commit:** negligible. Each checkpoint is a local `git commit` plus a lightweight tag in the sandbox. No egress or external storage cost.
+- **Session JSONL snapshot:** Each checkpoint copies the current Pi session `.jsonl` to `.daybreak/sessions/<taskId>/<turn>.jsonl`. With `DAYBREAK_SESSION_STORE_BACKEND=supabase` (default), the file is uploaded to Supabase Storage. A short session file is typically 5–50 KB. At 40 checkpoints per task × 10 tasks/day, this is ~2–20 MB/day, well under Supabase's 1 GB file storage free tier.
+- **Database checkpoint rows:** One `checkpoints` row per checkpoint with a small JSON-free payload. At 40 checkpoints per task × 1,000 tasks/month = 40K rows, still within Supabase's 500 MB / 500K edge-invocation limits; the 500 MB DB cap and 500K events row cap remain the binding constraints.
+
+### Fork strategies
+
+- **`git-reinstall` / `auto` (default):** pays only for a fresh E2B sandbox plus dependency re-install time. No snapshot storage. With the `daybreak-browser` template (Node 22, Chromium, `playwright-core` pre-baked), only repo-specific dependencies need reinstall, typically 10–60 s of compute.
+- **`snapshot`:** pays for snapshot creation (sandbox paused during snapshotting) plus ongoing snapshot storage, then the new sandbox runtime from that image. Snapshot creation is dominated by filesystem and memory size; see `packages/agent-runner/src/spikes/snapshot-benchmark.ts` for measured create/spawn latency on your workloads. Only enable when the benchmark shows snapshot create+spawn is faster than a clean install.
+- Estimated E2B compute for a 60-second re-install at 2 vCPU / 1.5 GB RAM: ~$0.00084. A 20-second snapshot spawn: ~$0.00028 plus snapshot storage at ~$0.0000045/GiB/s.
+
+### Parallel branches and budget
+
+- Each fork is a **new task** with its own `MAX_TURNS` and `MAX_COST_USD` budget. The parent task's budget is not consumed by a branch.
+- A `MAX_COST_USD` limit on the parent still protects the original run; branches that exceed their own limit fail independently.
+- **Abandonment stops metered E2B consumption:** calling `POST /api/tasks/:id/abandon` or promoting a sibling kills the sandbox and stops runtime charges. Branch tasks in `abandoned` or `promoted` status still occupy negligible Supabase/Redis rows but no longer consume E2B compute.
+- `DAYBREAK_MAX_CHECKPOINTS_PER_TASK` (default 100) caps per-task checkpoint growth. Older checkpoints are not deleted automatically in v1, but new checkpoints beyond the cap can be refused or older `active` checkpoints can be marked `abandoned` to stay within storage budget.
+
+### Summary table
+
+| Phase 4 cost driver | Default behavior | Approx. cost | Controlling env |
+|---------------------|------------------|--------------|-----------------|
+| Per-checkpoint git commit | local in sandbox | ~$0 | n/a |
+| Per-tool checkpoint | enabled by `DAYBREAK_CHECKPOINT_INTERVAL=tool` | storage only | `DAYBREAK_CHECKPOINT_INTERVAL` |
+| Session snapshot upload | Supabase Storage | 5–50 KB per checkpoint | `DAYBREAK_SESSION_STORE_BACKEND` |
+| Fork branch runtime | new sandbox, own budget | ~$0.0003–0.001 per branch | `DAYBREAK_FORK_STRATEGY` |
+| Snapshot storage | only with `snapshot` strategy | ~$0.0000045/GiB/s | `DAYBREAK_FORK_STRATEGY=snapshot` |
+| Maximum checkpoints | 100 per task | storage cap | `DAYBREAK_MAX_CHECKPOINTS_PER_TASK` |

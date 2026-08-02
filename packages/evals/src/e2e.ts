@@ -27,6 +27,10 @@ interface EvalResult {
   provider?: string;
   traceId?: string;
   error?: string;
+  branchTaskId?: string;
+  branchStatus?: string;
+  parentTaskId?: string;
+  parentCheckpointId?: string;
 }
 
 interface TaskResponse {
@@ -148,6 +152,37 @@ function extractPrUrl(events: StreamEvent[]): string | undefined {
   return undefined;
 }
 
+interface Checkpoint {
+  id: string;
+  taskId: string;
+  turn: number;
+  timestamp: number;
+  gitCommit?: string;
+  sessionRef?: string;
+  parentCheckpointId?: string;
+  branchTaskId?: string;
+  status: string;
+  toolCallId?: string;
+  costUsd?: number;
+}
+
+async function fetchCheckpoints(controlPlaneUrl: string, taskId: string): Promise<Checkpoint[]> {
+  const res = await fetch(`${controlPlaneUrl}/api/tasks/${taskId}/checkpoints`);
+  if (!res.ok) return [];
+  return (await res.json()) as Checkpoint[];
+}
+
+async function forkFromCheckpoint(controlPlaneUrl: string, checkpointId: string, prompt: string): Promise<{ taskId?: string; error?: string }> {
+  const res = await fetch(`${controlPlaneUrl}/api/checkpoints/${checkpointId}/fork`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt, strategy: "git-reinstall" }),
+  });
+  const data = (await res.json()) as { taskId?: string; error?: string };
+  if (!res.ok) return { error: data.error || `fork failed: ${res.status}` };
+  return data;
+}
+
 async function main() {
   const envPath = resolve(__dirname, "../../.env");
   loadConfig(envPath);
@@ -156,6 +191,7 @@ async function main() {
   const targetRepo = getArg("target-repo") || process.env.EVAL_TARGET_REPO || "https://github.com/bezaspace/daybreak-target";
   const targetBranch = getArg("target-branch") || process.env.EVAL_TARGET_BRANCH || "main";
   const timeoutMs = Number.parseInt(getArg("timeout") || process.env.EVAL_TIMEOUT_MS || "600000", 10);
+  const timeTravel = getArg("time-travel") === "1" || process.env.EVAL_TIME_TRAVEL === "1";
 
   const fixtures = await loadFixtures();
   if (fixtures.length === 0) {
@@ -231,6 +267,30 @@ async function main() {
         if (typeof result.estimatedCostUsd !== "number" || result.estimatedCostUsd < 0) {
           throw new Error("estimatedCostUsd is missing or negative");
         }
+
+        if (timeTravel) {
+          const checkpoints = await fetchCheckpoints(controlPlaneUrl, taskId);
+          if (checkpoints.length === 0) throw new Error("time-travel eval requires at least one checkpoint");
+          const checkpoint = checkpoints[Math.max(0, Math.floor(checkpoints.length / 2) - 1)];
+          if (!checkpoint.gitCommit) throw new Error("selected checkpoint has no gitCommit");
+          const branchPrompt = `${evalCase.prompt} (continue from a fresh attempt at turn ${checkpoint.turn})`;
+          console.log(`Time-travel eval: forking from checkpoint ${checkpoint.id} (turn ${checkpoint.turn})`);
+          const fork = await forkFromCheckpoint(controlPlaneUrl, checkpoint.id, branchPrompt);
+          if (fork.error || !fork.taskId) throw new Error(fork.error || "fork did not return a taskId");
+          const branchTaskId = fork.taskId;
+          result.branchTaskId = branchTaskId;
+          result.parentTaskId = taskId;
+          result.parentCheckpointId = checkpoint.id;
+          console.log(`Branch task ${branchTaskId} forked; waiting for completion...`);
+          const branchTask = await waitForTask(controlPlaneUrl, branchTaskId, timeoutMs);
+          result.branchStatus = branchTask.status;
+          if (branchTask.status !== "complete" && branchTask.status !== "failed") {
+            throw new Error(`branch task did not finish in time: ${branchTask.status}`);
+          }
+          if (!branchTask.traceId) throw new Error("branch task has no traceId");
+          if (typeof branchTask.costUsd !== "number") throw new Error("branch task has no costUsd");
+          console.log(pc.green(`Branch completed with status ${branchTask.status}, traceId=${branchTask.traceId}, costUsd=${branchTask.costUsd.toFixed(4)}`));
+        }
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -254,10 +314,12 @@ async function main() {
       provider: r.provider ?? "-",
       traceUrl: r.traceUrl ?? "-",
       prUrl: r.prUrl ?? "-",
+      branchStatus: r.branchStatus ?? "-",
+      parentCheckpointId: r.parentCheckpointId ?? "-",
     })),
   );
 
-  const failed = results.filter((r) => r.status !== "complete").length;
+  const failed = results.filter((r) => r.status !== "complete" || (timeTravel && r.branchStatus !== "complete")).length;
   if (failed === 0) {
     console.log(pc.bold(pc.green("All eval cases passed.")));
   } else {

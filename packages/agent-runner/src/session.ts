@@ -99,18 +99,19 @@ export class TaskRunner {
     );
 
     const taskId = this.taskId ?? randomUUID();
+    const useSupabase = this.config.sessionStoreBackend !== "file";
     const sessionStore = new SessionStore({
       taskId,
       cwd,
-      supabaseUrl: this.config.supabaseUrl,
-      supabaseServiceKey: this.config.supabaseServiceKey,
+      supabaseUrl: useSupabase ? this.config.supabaseUrl : undefined,
+      supabaseServiceKey: useSupabase ? this.config.supabaseServiceKey : undefined,
     });
     this.checkpointStore = new CheckpointStore({
       taskId,
       cwd,
       sessionStore,
-      supabaseUrl: this.config.supabaseUrl,
-      supabaseServiceKey: this.config.supabaseServiceKey,
+      supabaseUrl: useSupabase ? this.config.supabaseUrl : undefined,
+      supabaseServiceKey: useSupabase ? this.config.supabaseServiceKey : undefined,
     });
 
     const settingsManager = SettingsManager.inMemory(
@@ -299,6 +300,20 @@ export class TaskRunner {
               event.isError ? pc.red("ERROR") : pc.green("ok"),
               JSON.stringify(event.result).slice(0, 200),
             );
+            if (!this.abortedReason && this.checkpointStore && this.config.checkpointInterval === "tool" && this.session?.sessionManager) {
+              const turn = this.metrics.current().turns;
+              const costUsd = this.metrics.current().estimatedCostUsd;
+              const promise = this.checkpointStore
+                .createCheckpoint({ turn, sessionManager: this.session.sessionManager, toolCallId: event.toolCallId, costUsd })
+                .then((checkpoint: Checkpoint) => {
+                  console.log(pc.blue(`[checkpoint] turn=${checkpoint.turn} tool=${event.toolCallId?.slice(0, 8)} commit=${checkpoint.gitCommit?.slice(0, 7)}`));
+                  this.onEvent?.({ type: "checkpoint_created", checkpoint });
+                })
+                .catch((error: unknown) => {
+                  console.error("[checkpoint] create failed:", error instanceof Error ? error.message : String(error));
+                });
+              this.pendingCheckpoints.push(promise);
+            }
           }
           break;
         }
@@ -321,7 +336,7 @@ export class TaskRunner {
           this.turnSpan = undefined;
           this.turnContext = undefined;
 
-          if (!this.abortedReason && this.checkpointStore && this.session?.sessionManager) {
+          if (!this.abortedReason && this.checkpointStore && this.config.checkpointInterval !== "tool" && this.session?.sessionManager) {
             const turn = this.metrics.current().turns;
             const costUsd = this.metrics.current().estimatedCostUsd;
             const toolCallId = this.lastToolCallId;

@@ -432,10 +432,24 @@
 
 ---
 
+## D37. Phase 4 time-travel checkpoint strategy
+
+**Decision:** Use per-turn (or per-tool) git commits as the default filesystem checkpoint mechanism. Pi session state is serialized to a turn-specific JSONL snapshot and reloaded via `SessionManager.open`. Cross-sandbox forks default to a fresh E2B sandbox checking out the checkpoint commit and re-installing dependencies (`git-reinstall` strategy); E2B snapshots are supported but must be benchmarked before being enabled as the default.
+
+**Rationale:** Git commits are nearly free, deterministic, and avoid expensive per-turn E2B snapshots. Pi session serialization was proven in the Phase 0 spike: `SessionManager` writes a `.jsonl` file that can be copied and reopened by a new `SessionManager` instance, preserving context. E2B snapshots are slower to create and less resource-efficient than the pre-built `daybreak-browser` template, so they are the fallback, not the default.
+
+**Consequences:**
+- Every agent turn (or tool call, when `DAYBREAK_CHECKPOINT_INTERVAL=tool`) creates a `git commit` and lightweight tag plus a JSONL snapshot.
+- Rewind checks out the checkpoint commit, restores the JSONL into the active session directory, and resumes `TaskRunner` from that turn.
+- Forks spawn a new sandbox, clone the repo, checkout the checkpoint commit, re-install dependencies from the lockfile, and restore the JSONL snapshot.
+- `DAYBREAK_FORK_STRATEGY=snapshot` can bypass re-install when the benchmark justifies the snapshot cost.
+
+---
+
 ## D30. Open questions that can change these decisions
 
-- Can `pi-agent-core` serialize and fork sessions cleanly?
-- What is the real cost and latency of per-turn E2B snapshots?
+- ~~Can `pi-agent-core` serialize and fork sessions cleanly?~~ **Answered in Phase 4 M1/M3:** `SessionManager` writes a `.jsonl` that can be copied and reopened with `SessionManager.open`; true in-process forking is not required because we always start a fresh `TaskRunner` from the restored state.
+- ~~What is the real cost and latency of per-turn E2B snapshots?~~ **Answered in Phase 4 M4:** snapshots are supported but more expensive/slower than `git-reinstall` with the `daybreak-browser` template, so `git-reinstall` is the default.
 - Which free LLM provider gives the best coding-task success rate within its rate limits?
 - Will Cloudflare Workers free tier support the expected webhook and Durable Object load?
 - How do we prevent prompt-injection or sandbox-escape attacks from malicious repositories?
