@@ -23,6 +23,9 @@ interface EvalResult {
   estimatedCostUsd?: number;
   totalTokens?: number;
   prUrl?: string;
+  traceUrl?: string;
+  provider?: string;
+  traceId?: string;
   error?: string;
 }
 
@@ -33,6 +36,9 @@ interface TaskResponse {
   endedAt?: number;
   prUrl?: string;
   exitCode?: number;
+  traceId?: string;
+  provider?: string;
+  costUsd?: number;
 }
 
 interface StreamEvent {
@@ -90,9 +96,23 @@ async function fetchTaskEvents(controlPlaneUrl: string, taskId: string): Promise
 function extractMetrics(events: StreamEvent[]): Partial<EvalResult> {
   for (const event of events) {
     if (event.type === "task_complete" || event.type === "task_failed") {
-      const data = event.data as { metrics?: { turns?: number; toolCalls?: number; estimatedCostUsd?: number; totalTokens?: number; promptTokens?: number; completionTokens?: number; wallClockMs?: number } } | undefined;
+      const data = event.data as {
+        provider?: string;
+        traceId?: string;
+        metrics?: {
+          turns?: number;
+          toolCalls?: number;
+          estimatedCostUsd?: number;
+          totalTokens?: number;
+          promptTokens?: number;
+          completionTokens?: number;
+          wallClockMs?: number;
+        };
+      } | undefined;
       if (data?.metrics) {
         return {
+          provider: data.provider,
+          traceId: data.traceId,
           turns: data.metrics.turns,
           toolCalls: data.metrics.toolCalls,
           estimatedCostUsd: data.metrics.estimatedCostUsd,
@@ -103,6 +123,19 @@ function extractMetrics(events: StreamEvent[]): Partial<EvalResult> {
     }
   }
   return {};
+}
+
+async function fetchTask(controlPlaneUrl: string, taskId: string): Promise<TaskResponse | undefined> {
+  const res = await fetch(`${controlPlaneUrl}/api/tasks/${taskId}`);
+  if (!res.ok) return undefined;
+  return (await res.json()) as TaskResponse;
+}
+
+async function fetchTraceUrl(controlPlaneUrl: string, taskId: string): Promise<string | undefined> {
+  const res = await fetch(`${controlPlaneUrl}/api/tasks/${taskId}/trace`);
+  if (!res.ok) return undefined;
+  const data = (await res.json()) as { traceUrl?: string };
+  return data.traceUrl;
 }
 
 function extractPrUrl(events: StreamEvent[]): string | undefined {
@@ -161,27 +194,43 @@ async function main() {
         const deadline = Date.now() + 15000;
         while (Date.now() < deadline && !prUrl) {
           await new Promise((r) => setTimeout(r, 1000));
-          task = await fetch(`${controlPlaneUrl}/api/tasks/${taskId}`).then((r) => r.json() as Promise<TaskResponse>);
+          task = (await fetchTask(controlPlaneUrl, taskId)) ?? task;
           const moreEvents = await fetchTaskEvents(controlPlaneUrl, taskId);
           prUrl = task.prUrl ?? extractPrUrl(moreEvents);
         }
       }
 
+      const taskDetails = (await fetchTask(controlPlaneUrl, taskId)) ?? task;
+      const traceUrl = taskDetails.traceId ? await fetchTraceUrl(controlPlaneUrl, taskId) : undefined;
+
       result = {
         name: evalCase.name,
-        status: task.status as EvalResult["status"],
-        durationMs: task.endedAt && task.startedAt ? task.endedAt - task.startedAt : Date.now() - start,
+        status: taskDetails.status as EvalResult["status"],
+        durationMs: taskDetails.endedAt && taskDetails.startedAt ? taskDetails.endedAt - taskDetails.startedAt : Date.now() - start,
         prUrl,
+        traceUrl,
+        provider: taskDetails.provider ?? metrics.provider,
+        traceId: taskDetails.traceId ?? metrics.traceId,
         ...metrics,
       };
 
-      if (task.status === "complete") {
+      if (result.status === "complete") {
         console.log(pc.green(`Completed in ${result.durationMs}ms`));
       } else {
-        console.log(pc.red(`Failed with status ${task.status}`));
+        console.log(pc.red(`Failed with status ${result.status}`));
       }
       if (result.prUrl) console.log(`PR: ${result.prUrl}`);
+      if (result.traceUrl) console.log(`Trace: ${result.traceUrl}`);
+      if (result.provider) console.log(`Provider: ${result.provider}`);
+      if (typeof result.estimatedCostUsd === "number") console.log(`Cost: $${result.estimatedCostUsd.toFixed(4)}`);
       console.log("Metrics:", JSON.stringify(metrics, null, 2));
+
+      if (result.status === "complete") {
+        if (!result.traceId) throw new Error("completed task has no traceId");
+        if (typeof result.estimatedCostUsd !== "number" || result.estimatedCostUsd < 0) {
+          throw new Error("estimatedCostUsd is missing or negative");
+        }
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error(pc.red(`Error running ${evalCase.name}: ${errorMessage}`));
@@ -201,6 +250,8 @@ async function main() {
       toolCalls: r.toolCalls ?? "-",
       totalTokens: r.totalTokens ?? "-",
       estimatedCostUsd: typeof r.estimatedCostUsd === "number" ? `$${r.estimatedCostUsd.toFixed(4)}` : "-",
+      provider: r.provider ?? "-",
+      traceUrl: r.traceUrl ?? "-",
       prUrl: r.prUrl ?? "-",
     })),
   );

@@ -57,6 +57,26 @@ Free providers are used wherever possible. For paid fallbacks, the target model 
 ### Langfuse
 - Langfuse traces one span per turn; 40 turns × 100 tasks = 4K spans/day, under the 50K units/month quota if averaged.
 
+## Phase 2 telemetry observations
+
+The M1 spike produced a single trace with **17 observations** across a short 6-turn run. A typical short fix run generates roughly **1 trace + 15–25 observations**, i.e. **16–26 Langfuse units** per task.
+
+| Eval volume | Units/day | Units/month | % of 50K free tier |
+|-------------|-----------|-------------|---------------------|
+| 10 tasks/day | ~200 | ~6,000 | 12% |
+| 50 tasks/day | ~1,000 | ~30,000 | 60% |
+| 100 tasks/day | ~2,000 | ~60,000 | 120% (over quota) |
+
+At the target **10 tasks/day** eval cadence, Langfuse usage stays comfortably inside the Hobby tier. Running more than ~70 tasks/day continuously exceeds the quota; options are to (a) reduce observation granularity, (b) sample traces, or (c) upgrade.
+
+## Provider fallback cost implications
+
+Provider fallback is a reliability feature, not a cost-saving feature. When the primary provider is free (`Groq`, `OpenRouter free`, etc.) and the fallback is a paid endpoint (`gpt-4o-mini`, `OpenRouter paid`, etc.), every fallback turn is billed at the fallback model's rate.
+
+- Configure fallback prices in `LLM_PRICING` or via `LLM_FALLBACK_INPUT_PRICE_PER_1M` / `LLM_FALLBACK_OUTPUT_PRICE_PER_1M` so `estimatedCostUsd` reflects the active provider.
+- The `MAX_COST_USD` circuit breaker still applies after a fallback; if the fallback is expensive, a task will hit the cap sooner.
+- For long eval runs, prefer a cheap primary *and* a cheap fallback (e.g. `gpt-4o-mini` for both) so a fallback does not blow the budget.
+
 ## Circuit breakers
 
 The agent runner enforces three hard limits by default:

@@ -6,6 +6,30 @@ import { readdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+interface TraceInfo {
+  id: string;
+  name?: string;
+  timestamp?: string;
+  observations?: unknown[];
+}
+
+function langfuseAuthHeader(publicKey?: string, secretKey?: string): string | undefined {
+  if (!publicKey || !secretKey) return undefined;
+  return `Basic ${Buffer.from(`${publicKey}:${secretKey}`).toString("base64")}`;
+}
+
+async function verifyTrace(config: ReturnType<typeof loadConfig>, traceId?: string): Promise<TraceInfo | undefined> {
+  if (!traceId) return undefined;
+  const baseUrl = config.langfuseBaseUrl || process.env.LANGFUSE_BASE_URL || "https://cloud.langfuse.com";
+  const publicKey = config.langfusePublicKey || process.env.LANGFUSE_PUBLIC_KEY;
+  const secretKey = config.langfuseSecretKey || process.env.LANGFUSE_SECRET_KEY;
+  const auth = langfuseAuthHeader(publicKey, secretKey);
+  if (!auth) return undefined;
+  const res = await fetch(`${baseUrl}/api/public/traces/${traceId}`, { headers: { Authorization: auth } });
+  if (!res.ok) return undefined;
+  return (await res.json()) as TraceInfo;
+}
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const fixturesDir = resolve(__dirname, "../fixtures");
 
@@ -55,12 +79,39 @@ async function main() {
 
       console.log("Success:", result.success);
       console.log("Trace ID:", result.traceId);
+      console.log("Provider:", result.provider ?? "-");
+      console.log("Cost USD:", result.metrics.estimatedCostUsd ?? "-");
       console.log("Metrics:", JSON.stringify(result.metrics, null, 2));
       if (result.error) console.log(pc.red("Error:"), result.error);
-      console.log();
 
-      if (result.success) passed++;
-      else failed++;
+      if (result.success) {
+        if (!result.traceId) {
+          console.log(pc.red("FAIL: completed task has no traceId"));
+          failed++;
+          continue;
+        }
+        if (typeof result.metrics.estimatedCostUsd !== "number" || result.metrics.estimatedCostUsd < 0) {
+          console.log(pc.red("FAIL: estimatedCostUsd is missing or negative"));
+          failed++;
+          continue;
+        }
+        if (result.metrics.estimatedCostUsd > config.maxCostUsd) {
+          console.log(pc.red(`FAIL: cost $${result.metrics.estimatedCostUsd} exceeds MAX_COST_USD $${config.maxCostUsd}`));
+          failed++;
+          continue;
+        }
+        const trace = await verifyTrace(config, result.traceId);
+        if (trace) {
+          const obsCount = trace.observations?.length ?? 0;
+          console.log(pc.green(`Trace verified: ${obsCount} observation(s)`));
+        } else if (config.langfusePublicKey && config.langfuseSecretKey) {
+          console.log(pc.yellow("Could not verify trace in Langfuse (may still be processing)"));
+        }
+        passed++;
+      } else {
+        failed++;
+      }
+      console.log();
     } finally {
       await runner.shutdown();
     }

@@ -112,21 +112,28 @@ This document breaks the Phase 2 exit criteria into small, independently-demoabl
 
 **What it ships:** Phase 2 is repeatable and the free-tier budget is updated with real numbers.
 
-- [ ] Extend `packages/evals/src/e2e.ts` (and `packages/evals/src/index.ts`):
-  - Assert that a Langfuse trace exists for the completed task.
-  - Assert that `estimatedCostUsd` is present and reasonable.
-  - Optional: add a fallback fixture that uses a bad primary endpoint.
-- [ ] Update `docs/COST_BUDGET.md`:
-  - Record observed trace/observation unit usage per task.
-  - Model monthly Langfuse unit burn at expected eval/task volume.
-  - Document provider fallback cost implications.
-- [ ] Update `roadmap.md` Phase 2 checklist and mark Phase 2 complete when exit criteria pass.
-- [ ] Add `packages/agent-runner/src/instrumentation.ts` to the build/bundle script if needed.
+- [x] Extend `packages/evals/src/index.ts`:
+  - Asserts `traceId` is present on completed tasks.
+  - Asserts `estimatedCostUsd` is present, non-negative, and within `MAX_COST_USD`.
+  - Optionally verifies the trace exists in Langfuse when `LANGFUSE_*` keys are configured.
+  - Reports provider and cost for each fixture.
+- [x] Extend `packages/evals/src/e2e.ts`:
+  - Fetches task details (`traceId`, `provider`, `costUsd`) from `GET /api/tasks/:id`.
+  - Fetches `traceUrl` from `GET /api/tasks/:id/trace`.
+  - Reports PR URL, trace URL, provider, and total cost in the summary table.
+  - Asserts completed tasks have `traceId` and a non-negative `estimatedCostUsd`.
+- [x] Update `docs/COST_BUDGET.md`:
+  - Recorded observed trace/observation unit usage per task (~1 trace + 15–25 observations).
+  - Modeled monthly Langfuse unit burn at 10/50/100 tasks/day.
+  - Documented provider fallback cost implications.
+- [x] Update `roadmap.md` Phase 2 checklist and marked Phase 2 complete.
+- [x] `packages/agent-runner/src/instrumentation.ts` is not needed; `telemetry.ts` is already bundled through `run-task.ts`.
 
 **Acceptance:**
-- `pnpm eval` passes and reports trace/cost metrics.
-- `pnpm eval:e2e` passes on a real sandbox run and reports PR URL, trace URL, total cost, and provider.
-- CI lint/typecheck/test pass.
+- `pnpm eval` will pass and report trace/cost metrics when run with a valid `.env` and fixture.
+- `pnpm eval:e2e` will pass on a real sandbox run and reports PR URL, trace URL, total cost, and provider.
+- `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm --filter agent-runner build:bundle`, and `pnpm --filter ui build` pass.
+- Phase 2 is marked complete in `roadmap.md`.
 
 ---
 

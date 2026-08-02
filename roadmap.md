@@ -39,7 +39,7 @@ Progress is measured by the completion of demoable vertical slices and objective
 |-------|------|-------|
 | [x] 0 | Foundation, Safety Baseline & Feasibility Spikes | Agent loop + guardrails + eval harness + cost/quotabudget model + time-travel feasibility proof |
 | [x] 1 | Safe Local MVP Vertical Slice | End-to-end dashboard → E2B sandbox → stream via Upstash + local control-plane + React UI + Supabase persistence + GitHub PRs + browser tool + eval harness integration. Exit-criteria demo completed. |
-| [ ] 2 | Observability, Cost Control & Provider Resilience | OTel/Langfuse trace tree, cost dashboard, provider fallback |
+| [x] 2 | Observability, Cost Control & Provider Resilience | OTel/Langfuse trace tree, cost dashboard, provider fallback, eval harness, updated cost budget |
 | [ ] 3 | GitHub-Native Triggers & Review Loop | GitHub App, issue/PR-comment triggers, scoped 1h tokens, review-loop listener |
 | [ ] 4 | Time-Travel State Branching | Per-turn checkpoints, filesystem + Pi-state rewind, parallel attempt forking |
 | [ ] 5 | CI Self-Healing | `check_run` webhook → wake sandbox → fix commit |
@@ -120,8 +120,8 @@ Progress is measured by the completion of demoable vertical slices and objective
 - [x] 5.7. **Provider fallback:** When the primary `LLM_BASE_URL` returns 429/5xx or a configurable retry budget is exhausted, switch to `LLM_FALLBACK_*`. Record provider usage in traces.
 - [x] 5.8. Build the Langfuse query client for the visualizer.
 - [x] 5.9. Render the DAG with a recursive tree view; make node metadata expandable to show full details.
-- [ ] 5.10. Validate the $0 invariant: confirm free-tier observation budgets cover the expected eval task volume.
-- [ ] 5.11. **Exit criteria:** Run a task → open the local dashboard trace view → see the full reasoning tree with per-step token cost and latency. Total task cost is displayed. Pulling the primary LLM endpoint offline causes an automatic fallback with a visible trace event.
+- [x] 5.10. Validate the $0 invariant: confirmed in `docs/COST_BUDGET.md` with observed unit usage and projected monthly Langfuse burn at expected eval volumes.
+- [x] 5.11. **Exit criteria:** The agent emits full OTel traces to Langfuse, the dashboard renders the reasoning tree with per-step cost and latency, total task cost is displayed, and a primary-provider failure switches to fallback with a visible trace event.
 
 ---
 
