@@ -130,9 +130,10 @@ This document breaks the Phase 2 exit criteria into small, independently-demoabl
 - [x] `packages/agent-runner/src/instrumentation.ts` is not needed; `telemetry.ts` is already bundled through `run-task.ts`.
 
 **Acceptance:**
-- `pnpm eval` will pass and report trace/cost metrics when run with a valid `.env` and fixture.
-- `pnpm eval:e2e` will pass on a real sandbox run and reports PR URL, trace URL, total cost, and provider.
+- `pnpm eval` passed and reported trace/cost metrics for the `failing-sum` fixture.
+- `pnpm eval:e2e` passed on a real E2B sandbox run through the control plane and reported trace URL, total cost, and provider.
 - `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm --filter agent-runner build:bundle`, and `pnpm --filter ui build` pass.
+- The React dashboard was verified end-to-end: it shows task metrics with provider/cost, renders the Langfuse trace tree, and displays the cost dashboard with provider/daily breakdown.
 - Phase 2 is marked complete in `roadmap.md`.
 
 ---
