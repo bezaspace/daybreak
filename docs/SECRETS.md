@@ -24,9 +24,10 @@ Daybreak needs several credentials across its lifecycle. This document explains 
 - The agent should never read this from inside a sandbox. The control plane injects a short-lived sandbox API key only when spawning a workspace.
 
 ### GitHub
-- `GITHUB_APP_ID`, `GITHUB_WEBHOOK_SECRET` — GitHub App configuration.
-- `GITHUB_TOKEN` — per-installation token with limited scopes (`contents:write`, `pull_requests:write`, `checks:read`, `issues:read`).
-- Store `GITHUB_WEBHOOK_SECRET` as a Cloudflare secret and verify HMAC in the worker.
+- `GITHUB_TOKEN` — a Personal Access Token (PAT) for Phase 3. It must have `contents:write` and `pull_requests:write` on every repo Daybreak touches. `checks:read` and `issues:read` are useful for context.
+- `GITHUB_WEBHOOK_SECRET` — used to verify `X-Hub-Signature-256` on repo webhook deliveries. Store it as a Cloudflare/Worker secret for Phase 7; locally it lives in `.env`.
+- `GITHUB_WEBHOOK_REPO_ALLOWLIST` — comma-separated `owner/repo` or `owner/*` patterns limiting which repos may trigger the control plane.
+- `GITHUB_APP_ID` — **deferred to Phase 7**. The App will replace the PAT, add JWT signing, 1-hour installation tokens, and automatic per-installation webhooks.
 
 ### Redis / Supabase / Langfuse
 - `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_TOKEN` are high-sensitivity; the sandbox uses them to publish the event stream and the control plane uses them to read it back.

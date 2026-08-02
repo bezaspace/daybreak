@@ -188,15 +188,16 @@
 
 ---
 
-## D15. GitHub App triggers instead of PAT for production
+## D15. GitHub App triggers instead of PAT for production (deferred)
 
-**Decision:** Phase 1 uses a Personal Access Token (PAT) for speed, but Phase 3 replaces it with a GitHub App using scoped 1-hour installation tokens.
+**Decision:** Phase 1 uses a Personal Access Token (PAT) for speed. Phase 3 continues to use a PAT with manually configured repo webhooks. The GitHub App migration — with scoped 1-hour installation tokens — is deferred to Phase 7 (Cloudflare deployment).
 
-**Rationale:** PATs are simpler for an MVP but are broad-lived credentials. Installation tokens are scoped to an org/repo and expire quickly, which matches the security model.
+**Rationale:** A GitHub App is the cleaner long-term solution, but it requires a public webhook endpoint, App registration, private-key management, and JWT token exchange. Until the control plane is hosted on Cloudflare, the local control plane can receive repo webhooks via `cloudflared`/`ngrok` and use an existing PAT. This lets Phase 3 ship the trigger/review-loop behavior earlier.
 
 **Consequences:**
-- The PR delivery path is implemented twice (PAT, then App), but the second implementation is a configuration swap.
-- We must implement JWT signing and token exchange in the control plane.
+- The PR delivery path in Phase 3 uses the PAT (`GITHUB_TOKEN`).
+- A later Phase 7 migration will add JWT signing, installation-token exchange, and per-installation multi-tenancy.
+- See D36 for the Phase 3 PAT-only workarounds and the full deferred-item list.
 
 ---
 
@@ -402,6 +403,34 @@
 **Consequences:**
 - The decoy `.env` is not a real secret; it exists only to prove the agent never reads it.
 - CI must be kept minimal (`node --test`) so it passes quickly after the agent fixes `sum.js`.
+
+## D36. Phase 3 PAT-only authentication and deferred GitHub App work
+
+**Decision:** Phase 3 uses a Personal Access Token (PAT) for GitHub API and git authentication. GitHub App registration, JWT signing, 1-hour installation tokens, and per-installation multi-tenancy are deferred to Phase 7 (Cloudflare deployment).
+
+**Rationale:** A GitHub App is the cleaner long-term solution, but it requires a public webhook endpoint, App registration, private-key management, and JWT token exchange. Until the control plane is hosted on Cloudflare, the local control plane can receive repo webhooks via `cloudflared`/`ngrok` and use an existing PAT. This lets Phase 3 ship the trigger/review-loop behavior earlier.
+
+**Phase 3 workarounds:**
+- **Tokens:** `GITHUB_TOKEN` (PAT) is passed to the sandbox and used for `createPullRequest` and `git push`. It must have `contents:write` and `pull_requests:write` on the target repos.
+- **Webhooks:** Events are delivered through manually configured repository (or organization) webhooks pointing at the local tunnel URL. The `GITHUB_WEBHOOK_SECRET` is used to verify `X-Hub-Signature-256`.
+- **Repo trust:** A repo allowlist (`GITHUB_WEBHOOK_REPO_ALLOWLIST`) prevents the agent from running on untrusted public repos. This replaces the per-installation scoping a GitHub App would provide.
+- **Multi-tenancy:** Per-sender (`sender.login`) or per-repo rate limits are used instead of per-installation rate limits. The `installations` table and `installation_id` foreign key are deferred.
+- **Bot identity:** The `@daybreak-bot` mention is detected as a string in `comment.body`. The PAT owner account will be the author of commits and PRs; a separate bot user account can be used by providing its PAT.
+- **CI self-healing stub:** `check_run` webhooks are acknowledged in Phase 3 but not acted on. Full CI self-healing (Phase 5) will be wired once the GitHub App path is in place.
+
+**Deferred to Phase 7 / GitHub App migration:**
+- Register a GitHub App with least-privilege permissions (`contents:write`, `pull_requests:write`, `issues:read`, `checks:read`, `metadata:read`).
+- Implement JWT signing and `POST /app/installations/{id}/access_tokens` exchange for 1-hour installation tokens.
+- Replace `GITHUB_TOKEN` with installation tokens in `createPullRequest` and sandbox git auth.
+- Add per-installation multi-tenancy (`installations` table, `tasks.installation_id`, per-installation rate limits).
+- Auto-subscribe to events on App install rather than manually configuring repo webhooks.
+
+**Consequences:**
+- A PAT is long-lived and broader in scope than an installation token; it must be kept out of source control and out of logs.
+- Webhook setup is manual per repo until the App is available.
+- The multi-tenancy and trust model is coarser (repo/sender based) in Phase 3.
+
+---
 
 ## D30. Open questions that can change these decisions
 

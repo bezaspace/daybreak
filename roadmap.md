@@ -125,20 +125,22 @@ Progress is measured by the completion of demoable vertical slices and objective
 
 ---
 
-## 6. Phase 3 — GitHub-Native Triggers & Review Loop
+## 6. Phase 3 — GitHub-Native Triggers & Review Loop (PAT-only)
 
-**Goal:** Daybreak is triggerable from a GitHub Issue or a PR review comment, uses scoped 1-hour installation tokens, and listens for reviewer comments to iterate.
+> **Auth note:** Phase 3 uses a PAT and manually configured repo webhooks. GitHub App registration, JWT signing, 1-hour installation tokens, and per-installation multi-tenancy are deferred to Phase 7. See `docs/phase-3-implementation-milestones.md` and `decisions.md`.
 
-- [ ] 6.1. **GitHub App:** Register with least-privilege permissions: `contents: write`, `pull_requests: write`, `issues: read`, `checks: read`, `metadata: read`. Subscribes to `issue_comment`, `pull_request_review_comment`, `pull_request_review`, `check_run`.
-- [ ] 6.2. **Local Webhook Tunneling:** Use `cloudflared` or `ngrok` to expose the local control plane to GitHub webhooks during development.
-- [ ] 6.3. **Webhook handler:** In the control plane. Verifies signature, fetches a scoped 1-hour installation token via the App's JWT, creates a task, provisions the sandbox with the token injected.
-- [ ] 6.4. **Issue/PR-comment parsing:** Extracts the instruction, target repo/branch, and context; maps to a task spec.
-- [ ] 6.5. **Review-loop listener:** On new `pull_request_review_comment` with `@daybreak-bot`, wakes the sandbox, applies the review feedback, pushes to the existing PR branch.
-- [ ] 6.6. **Multi-tenancy stub:** In Supabase, map GitHub installation → workspace/org/user, and enforce per-installation task-rate limits.
-- [ ] 6.7. Generate the GitHub App private key; store as a Cloudflare/Worker secret; implement JWT signing + installation-token exchange.
-- [ ] 6.8. Replace the MVP PAT path with installation tokens everywhere.
-- [ ] 6.9. Implement comment-trigger routing: distinguish "new task" (issue) vs. "iterate on existing PR" (review comment).
-- [ ] 6.10. Add sandbox standby/keep-alive: a PR-opened task keeps its sandbox alive (idle) for a configurable window to absorb review feedback, subject to cost/turn caps.
+**Goal:** Daybreak is triggerable from a GitHub Issue or a PR review comment via repo webhooks, uses a PAT for API and git access, and listens for reviewer comments to iterate.
+
+- [ ] 6.1. **Repo webhooks and local tunneling:** Document and configure repo/org webhooks pointing at the local control plane (via `cloudflared` or `ngrok`). Subscribe to `issue_comment`, `pull_request_review_comment`, `pull_request_review`, `check_run`.
+- [ ] 6.2. **Webhook handler:** In the control plane. Verify `X-Hub-Signature-256`, validate the repo against an allowlist, parse the event, and create a task.
+- [ ] 6.3. **PAT-based auth path:** Use `GITHUB_TOKEN` (PAT with `contents:write` and `pull_requests:write`) for PR creation and git push inside the sandbox. Validate token permissions on the target repo before running.
+- [ ] 6.4. **Issue/PR-comment parsing:** Extract the instruction, target repo/branch, and context; strip the `@daybreak-bot` mention; map to a task spec.
+- [ ] 6.5. **Review-loop listener:** On a new `pull_request_review_comment` with `@daybreak-bot`, wake the sandbox (or create a fresh one) and push a follow-up commit to the existing PR branch.
+- [ ] 6.6. **Multi-tenancy stub (PAT version):** In Supabase, map repo/sender to a workspace and enforce per-repo/per-sender task-rate limits. Per-installation limits are deferred.
+- [ ] 6.7. ~~Generate the GitHub App private key; store as a Cloudflare/Worker secret; implement JWT signing + installation-token exchange.~~ *Deferred to Phase 7.*
+- [ ] 6.8. ~~Replace the MVP PAT path with installation tokens everywhere.~~ *Deferred to Phase 7.*
+- [ ] 6.9. **Comment-trigger routing:** Distinguish "new task" (issue) vs. "iterate on existing PR" (review comment).
+- [ ] 6.10. **Sandbox standby/keep-alive:** A PR-opened task keeps its sandbox alive (idle/paused) for a configurable window to absorb review feedback, subject to cost/turn caps.
 - [ ] 6.11. **Exit criteria:** Comment `@daybreak-bot fix the flaky test` on an issue → Daybreak opens a PR. A reviewer comments `@daybreak-bot also handle the null case` → Daybreak pushes a follow-up commit to the same PR. All token/cost guardrails remain active.
 
 ---
