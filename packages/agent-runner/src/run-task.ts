@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 import { loadConfig } from "@daybreak/shared";
-import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { execSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import pc from "picocolors";
-import { TaskRunner } from "./session.js";
+import { TaskRunner, type TaskEvent } from "./session.js";
 import { createStreamPublisher } from "./stream.js";
 
 const workDir = process.env.WORK_DIR || "/tmp";
@@ -52,7 +51,7 @@ function omitScreenshot<T>(obj: T): T {
   return clone as T;
 }
 
-function toStreamData(event: AgentSessionEvent): unknown {
+function toStreamData(event: TaskEvent): unknown {
   switch (event.type) {
     case "message_update":
       return {
@@ -94,6 +93,9 @@ function toStreamData(event: AgentSessionEvent): unknown {
         tokensBefore: event.result?.tokensBefore,
         firstKeptEntryId: event.result?.firstKeptEntryId,
       };
+    case "provider_switched":
+    case "fallback_applied":
+      return { from: event.from, to: event.to, reason: event.reason, modelId: event.modelId };
     default:
       return {};
   }

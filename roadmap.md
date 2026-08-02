@@ -117,7 +117,7 @@ Progress is measured by the completion of demoable vertical slices and objective
 - [ ] 5.4. **Cost dashboard:** Aggregate $-spend per task, per provider, per day, sourced from span token counts × provider pricing.
 - [x] 5.5. Map the Phase 1 event schema 1:1 to OTel span attributes.
 - [x] 5.6. Wrap Pi SDK's LLM-call and tool-execution hooks with span start/end.
-- [ ] 5.7. **Provider fallback:** When the primary `LLM_BASE_URL` returns 429/5xx or a configurable retry budget is exhausted, switch to `LLM_FALLBACK_*`. Record provider usage in traces.
+- [x] 5.7. **Provider fallback:** When the primary `LLM_BASE_URL` returns 429/5xx or a configurable retry budget is exhausted, switch to `LLM_FALLBACK_*`. Record provider usage in traces.
 - [ ] 5.8. Build the Langfuse query client for the visualizer.
 - [ ] 5.9. Render the DAG with React Flow or D3; make nodes clickable to show full prompt/response.
 - [ ] 5.10. Validate the $0 invariant: confirm free-tier observation budgets cover the expected eval task volume.

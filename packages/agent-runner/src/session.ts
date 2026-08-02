@@ -8,9 +8,13 @@ import { SafetyMiddleware } from "@daybreak/shared";
 import pc from "picocolors";
 import { randomUUID } from "node:crypto";
 import { browserTool, closeBrowser } from "./browser-tool.js";
-import { createModelRuntime, getFallbackModel } from "./llm.js";
+import { createModelRuntime, type ProviderSwitchInfo } from "./llm.js";
 import { MetricsCollector } from "./metrics.js";
 import { initTelemetry, shutdownTelemetry } from "./telemetry.js";
+
+type ProviderSwitchEvent = { type: "provider_switched" } & ProviderSwitchInfo;
+type FallbackAppliedEvent = { type: "fallback_applied" } & ProviderSwitchInfo;
+export type TaskEvent = AgentSessionEvent | ProviderSwitchEvent | FallbackAppliedEvent;
 
 export interface RunOptions {
   prompt: string;
@@ -18,7 +22,7 @@ export interface RunOptions {
   systemPrompt?: string;
   autoApprove?: boolean;
   onStream?: (text: string) => void;
-  onEvent?: (event: AgentSessionEvent) => void;
+  onEvent?: (event: TaskEvent) => void;
   taskId?: string;
 }
 
@@ -29,6 +33,7 @@ export class TaskRunner {
   private session?: AgentSession;
   private abortedReason?: string;
   private wallClockTimer?: NodeJS.Timeout;
+  private onEvent?: (event: TaskEvent) => void;
 
   private provider?: TracerProvider;
   private tracer?: Tracer;
@@ -44,7 +49,7 @@ export class TaskRunner {
   constructor(config: DaybreakConfig) {
     this.config = config;
     this.safety = new SafetyMiddleware(config);
-    this.metrics = new MetricsCollector();
+    this.metrics = new MetricsCollector(config.llmPricing);
   }
 
   getTraceId(): string | undefined {
@@ -53,6 +58,7 @@ export class TaskRunner {
 
   async run(options: RunOptions): Promise<TaskResult> {
     const { prompt, cwd, systemPrompt, autoApprove, onStream, onEvent, taskId: explicitTaskId } = options;
+    this.onEvent = onEvent;
 
     const telemetry = initTelemetry({
       taskId: explicitTaskId,
@@ -65,7 +71,17 @@ export class TaskRunner {
     this.taskId = telemetry.taskId;
     this.traceId = telemetry.traceId;
 
-    const { modelRuntime, model } = await createModelRuntime(this.config.llm, this.config.llmFallback);
+    const { modelRuntime, model } = await createModelRuntime(
+      this.config.llm,
+      this.config.llmFallback,
+      {
+        onProviderSwitch: (info) => {
+          this.onEvent?.({ type: "fallback_applied", ...info });
+          this.onEvent?.({ type: "provider_switched", ...info });
+        },
+      },
+      this.config.llmPricing,
+    );
 
     const settingsManager = SettingsManager.inMemory({
       compaction: {
@@ -155,13 +171,13 @@ export class TaskRunner {
     };
   }
 
-  private wireTelemetry(onEvent?: (event: AgentSessionEvent) => void): void {
+  private wireTelemetry(onEvent?: (event: TaskEvent) => void): void {
     if (!this.session || !this.tracer) return;
 
     const pendingToolCalls = new Map<string, ToolCallRecord>();
 
     this.session.subscribe((event: AgentSessionEvent) => {
-      onEvent?.(event);
+      onEvent?.(event as TaskEvent);
 
       switch (event.type) {
         case "turn_start": {
@@ -275,15 +291,15 @@ export class TaskRunner {
 
     const span = this.tracer.startSpan("llm", {}, parent);
     span.setAttribute("gen_ai.operation.name", "chat");
-    span.setAttribute("gen_ai.provider.name", this.config.llm.provider);
-    span.setAttribute("gen_ai.system", this.config.llm.provider);
+    span.setAttribute("gen_ai.provider.name", assistant.provider ?? this.config.llm.provider);
+    span.setAttribute("gen_ai.system", assistant.provider ?? this.config.llm.provider);
     span.setAttribute("gen_ai.request.model", assistant.model ?? this.config.llm.modelId);
     span.setAttribute("gen_ai.response.model", assistant.model ?? this.config.llm.modelId);
     if (usage) {
       span.setAttribute("gen_ai.usage.input_tokens", usage.input ?? 0);
       span.setAttribute("gen_ai.usage.output_tokens", usage.output ?? 0);
       span.setAttribute("gen_ai.usage.total_tokens", usage.totalTokens ?? 0);
-      if (usage.cost?.total) {
+      if (usage.cost?.total !== undefined) {
         span.setAttribute("gen_ai.usage.cost", usage.cost.total);
       }
     }

@@ -45,15 +45,17 @@ This document breaks the Phase 2 exit criteria into small, independently-demoabl
 
 **What it ships:** When the primary LLM provider is rate-limited or down, the agent automatically switches to the fallback provider, and the trace records the switch.
 
-- [ ] Choose a fallback strategy:
-  - **Preferred:** configure Pi's `retry.fallbackChains` setting through `SettingsManager.inMemory()` in `session.ts`.
-  - **Fallback:** if the installed Pi API does not expose `retry.fallbackChains`, wrap `modelRuntime`/`session.prompt()` in `llm.ts`/`session.ts` to catch provider errors and swap to the fallback model.
-- [ ] Register both providers with their own API keys (already partially supported in `llm.ts` via `getFallbackModel`).
-- [ ] Emit stream events `provider_switched` and `fallback_applied` with `from`, `to`, and `reason`.
-- [ ] Add a per-model token-pricing map (env or config file) keyed by `provider/modelId`.
-  - Use it in `MetricsCollector` to compute `estimatedCostUsd` instead of relying on Pi's `usage.cost` (currently all zeros in `llm.ts`).
-- [ ] Update `sandbox.ts` to accept and pass `LLM_FALLBACK_*` env vars.
-- [ ] Surface provider usage and total cost in `task_complete`/`task_failed` metrics.
+- [x] Implement a composite provider in `packages/agent-runner/src/llm.ts` that wraps the primary and optional fallback providers.
+  - On primary failure it tries the fallback once per LLM call, then stays on fallback for the rest of the task.
+  - Mutates the final `AssistantMessage.provider` to the real provider id so telemetry and cost accounting are accurate.
+- [x] Register both providers with their own API keys under `daybreak-primary` and `daybreak-fallback`; expose a single `daybreak` composite provider to the `AgentSession`.
+- [x] Emit stream events `provider_switched` and `fallback_applied` with `from`, `to`, `reason`, and `modelId`.
+- [x] Add per-model token-pricing inputs in `packages/shared/src/types.ts` and `packages/shared/src/config.ts`:
+  - `LLM_INPUT_PRICE_PER_1M` / `LLM_OUTPUT_PRICE_PER_1M` and fallback variants.
+  - `LLM_PRICING` JSON map keyed by `provider/modelId`, `modelId`, or `*`.
+  - Use the map in `MetricsCollector` to compute `estimatedCostUsd` instead of relying on Pi's `usage.cost`.
+- [x] Update `sandbox.ts` to pass `LLM_*_PRICE_*` and `LLM_PRICING` env vars into the E2B sandbox.
+- [x] Surface provider usage and total cost in `task_complete`/`task_failed` metrics via `estimatedCostUsd`.
 
 **Acceptance:**
 - Set `LLM_BASE_URL` to a failing/unreachable endpoint and `LLM_FALLBACK_BASE_URL` to a working one.

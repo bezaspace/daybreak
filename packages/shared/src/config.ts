@@ -1,11 +1,12 @@
 import dotenv from "dotenv";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
-import type { AgentConfig } from "./types.js";
+import type { AgentConfig, LlmPricingMap } from "./types.js";
 
 export interface DaybreakConfig {
   llm: AgentConfig;
   llmFallback?: AgentConfig;
+  llmPricing: LlmPricingMap;
   maxTurns: number;
   maxWallClockMinutes: number;
   maxCostUsd: number;
@@ -82,11 +83,22 @@ export function loadConfig(envPath?: string): DaybreakConfig {
     return Number.isNaN(parsed) ? fallback : parsed;
   };
 
+  const parsePricingMap = (raw?: string): LlmPricingMap => {
+    if (!raw) return {};
+    try {
+      return JSON.parse(raw) as LlmPricingMap;
+    } catch {
+      return {};
+    }
+  };
+
   const primary: AgentConfig = {
     provider: (get("LLM_PROVIDER") as AgentConfig["provider"]) || "custom",
     baseUrl: get("LLM_BASE_URL") || "https://api.openai.com/v1",
     apiKey: get("LLM_API_KEY") || "",
     modelId: get("LLM_MODEL") || "gpt-4o-mini",
+    inputPricePer1MTokens: parseFloatEnv("LLM_INPUT_PRICE_PER_1M", 0),
+    outputPricePer1MTokens: parseFloatEnv("LLM_OUTPUT_PRICE_PER_1M", 0),
   };
 
   const fallback: AgentConfig | undefined = get("LLM_FALLBACK_BASE_URL")
@@ -95,6 +107,8 @@ export function loadConfig(envPath?: string): DaybreakConfig {
         baseUrl: get("LLM_FALLBACK_BASE_URL") || primary.baseUrl,
         apiKey: get("LLM_FALLBACK_API_KEY") || primary.apiKey,
         modelId: get("LLM_FALLBACK_MODEL") || primary.modelId,
+        inputPricePer1MTokens: parseFloatEnv("LLM_FALLBACK_INPUT_PRICE_PER_1M", 0),
+        outputPricePer1MTokens: parseFloatEnv("LLM_FALLBACK_OUTPUT_PRICE_PER_1M", 0),
       }
     : undefined;
 
@@ -120,6 +134,7 @@ export function loadConfig(envPath?: string): DaybreakConfig {
     compactionEnabled,
     compactionReserveTokens: parseIntEnv("COMPACTION_RESERVE_TOKENS", DEFAULT_COMPACTION_RESERVE_TOKENS),
     compactionKeepRecentTokens: parseIntEnv("COMPACTION_KEEP_RECENT_TOKENS", DEFAULT_COMPACTION_KEEP_RECENT_TOKENS),
+    llmPricing: parsePricingMap(get("LLM_PRICING")),
     daytonaApiKey: get("DAYTONA_API_KEY"),
     daytonaApiUrl: get("DAYTONA_API_URL"),
     daytonaTarget: get("DAYTONA_TARGET"),

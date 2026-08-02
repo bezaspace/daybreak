@@ -1,13 +1,13 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai/compat";
-import type { TaskMetrics, ToolCallRecord } from "@daybreak/shared";
+import type { LlmPricingMap, TaskMetrics, ToolCallRecord } from "@daybreak/shared";
 
 export class MetricsCollector {
   private metrics: TaskMetrics;
   private toolCalls: ToolCallRecord[] = [];
   private startTime = Date.now();
 
-  constructor() {
+  constructor(private pricing: LlmPricingMap = {}) {
     this.metrics = {
       promptTokens: 0,
       completionTokens: 0,
@@ -57,7 +57,27 @@ export class MetricsCollector {
     this.metrics.promptTokens += usage.input || 0;
     this.metrics.completionTokens += usage.output || 0;
     this.metrics.totalTokens += usage.totalTokens || 0;
-    this.metrics.estimatedCostUsd += usage.cost?.total || 0;
+
+    const cost = this.computeCost(assistant.provider, assistant.model, usage);
+    usage.cost.total = cost;
+    this.metrics.estimatedCostUsd += cost;
+  }
+
+  private computeCost(provider: string | undefined, modelId: string | undefined, usage: AssistantMessage["usage"]): number {
+    const keys = [
+      provider && modelId ? `${provider}/${modelId}` : undefined,
+      modelId,
+      "*",
+    ].filter((k): k is string => Boolean(k));
+
+    for (const key of keys) {
+      const rates = this.pricing[key];
+      if (rates) {
+        return ((usage.input || 0) * rates.input + (usage.output || 0) * rates.output) / 1_000_000;
+      }
+    }
+
+    return usage.cost?.total || 0;
   }
 
   finalize(): TaskMetrics {

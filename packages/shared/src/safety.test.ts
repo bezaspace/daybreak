@@ -3,6 +3,7 @@ import { isSensitivePath, isProtectedBranch, SafetyMiddleware, type DaybreakConf
 
 const config: DaybreakConfig = {
   llm: { provider: "custom", baseUrl: "http://localhost", apiKey: "x", modelId: "test" },
+  llmPricing: {},
   maxTurns: 40,
   maxWallClockMinutes: 20,
   maxCostUsd: 0.5,

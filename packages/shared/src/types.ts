@@ -36,5 +36,9 @@ export interface AgentConfig {
   baseUrl: string;
   apiKey: string;
   modelId: string;
+  inputPricePer1MTokens?: number;
+  outputPricePer1MTokens?: number;
   fallback?: AgentConfig;
 }
+
+export type LlmPricingMap = Record<string, { input: number; output: number }>;
