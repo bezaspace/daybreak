@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { CostDashboard } from "./CostDashboard.js";
+import { TraceView } from "./TraceView.js";
 
 interface StreamEvent {
   id: string;
@@ -15,6 +17,11 @@ interface Task {
   prBranch?: string;
   status: string;
   prUrl?: string;
+  traceId?: string;
+  provider?: string;
+  costUsd?: number;
+  startedAt?: number;
+  endedAt?: number;
 }
 
 interface Screenshot {
@@ -29,6 +36,7 @@ interface Config {
   maxCostUsd: number;
   compactionEnabled: boolean;
   e2bTemplate?: string;
+  provider?: string;
 }
 
 interface TaskMetrics {
@@ -72,9 +80,15 @@ function formatEvent(event: StreamEvent): string {
     const data = event.data as { aborted?: boolean; tokensBefore?: number; firstKeptEntryId?: string };
     return `[${time}] compaction_end: ${data.aborted ? "aborted" : `tokensBefore=${data.tokensBefore}, firstKept=${data.firstKeptEntryId}`}`;
   }
+  if (event.type === "provider_switched" || event.type === "fallback_applied") {
+    const data = event.data as { from?: string; to?: string; reason?: string; modelId?: string };
+    return `[${time}] ${event.type}: ${data.from} → ${data.to} (${data.reason}) model=${data.modelId || "-"}`;
+  }
   if (event.type === "task_complete" || event.type === "task_failed") {
-    const data = event.data as { success?: boolean; error?: string };
-    return `[${time}] ${event.type}${data.error ? ": " + data.error : ""}`;
+    const data = event.data as { success?: boolean; error?: string; provider?: string; metrics?: { estimatedCostUsd?: number } };
+    const cost = typeof data.metrics?.estimatedCostUsd === "number" ? ` cost=$${data.metrics.estimatedCostUsd.toFixed(4)}` : "";
+    const provider = data.provider ? ` provider=${data.provider}` : "";
+    return `[${time}] ${event.type}${provider}${cost}${data.error ? ": " + data.error : ""}`;
   }
   return `[${time}] ${event.type}: ${JSON.stringify(event.data).slice(0, 200)}`;
 }
@@ -100,9 +114,11 @@ export function App() {
   const [prBranch, setPrBranch] = useState<string | null>(null);
   const [screenshots, setScreenshots] = useState<Screenshot[]>([]);
   const [metrics, setMetrics] = useState<TaskMetrics | null>(null);
+  const [activeProvider, setActiveProvider] = useState<string | null>(null);
   const [config, setConfig] = useState<Config | null>(null);
   const terminalRef = useRef<HTMLPreElement>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [view, setView] = useState<"run" | "trace" | "costs">("run");
 
   function loadTasks() {
     fetch("/api/tasks")
@@ -122,6 +138,8 @@ export function App() {
     loadTasks();
     loadConfig();
   }, []);
+
+  const selectedTask = taskId ? tasks.find((t) => t.id === taskId) : undefined;
 
   useEffect(() => {
     if (!taskId) return;
@@ -163,13 +181,16 @@ export function App() {
         }
         if (event.type === "task_complete") {
           setStatus("complete");
-          const data = event.data as { metrics?: TaskMetrics };
+          const data = event.data as { metrics?: TaskMetrics; provider?: string; traceId?: string };
           if (data.metrics) setMetrics(data.metrics);
+          if (data.provider) setActiveProvider(data.provider);
+          if (data.traceId) loadTasks();
         }
         if (event.type === "task_failed") {
           setStatus("failed");
-          const data = event.data as { metrics?: TaskMetrics; error?: string };
+          const data = event.data as { metrics?: TaskMetrics; error?: string; provider?: string };
           if (data.metrics) setMetrics(data.metrics);
+          if (data.provider) setActiveProvider(data.provider);
         }
       } catch {
         // ignore heartbeat or malformed
@@ -291,10 +312,38 @@ export function App() {
           <strong>Metrics</strong>: turns {metrics.turns ?? "-"} · tool calls {metrics.toolCalls ?? "-"}
           {metrics.blockedToolCalls ? ` · blocked ${metrics.blockedToolCalls}` : ""} · tokens {metrics.totalTokens ?? "-"} · cost{" "}
           {typeof metrics.estimatedCostUsd === "number" ? `$${metrics.estimatedCostUsd.toFixed(4)}` : "-"} · wall-clock {formatDuration(metrics.wallClockMs)}
+          {activeProvider ? ` · provider: ${activeProvider}` : ""}
+          {config?.provider && activeProvider && config.provider !== activeProvider ? " (fallback)" : ""}
         </div>
       )}
 
-      {screenshots.length > 0 && (
+      {taskId && (
+        <div style={{ marginBottom: "1rem" }}>
+          <button type="button" disabled={view === "run"} onClick={() => setView("run")} style={{ marginRight: 8 }}>
+            Run
+          </button>
+          <button type="button" disabled={view === "trace"} onClick={() => setView("trace")} style={{ marginRight: 8 }}>
+            Trace
+          </button>
+          <button type="button" disabled={view === "costs"} onClick={() => setView("costs")}>
+            Costs
+          </button>
+        </div>
+      )}
+
+      {view === "trace" && taskId && selectedTask?.traceId && (
+        <TraceView
+          taskId={taskId}
+          traceId={selectedTask.traceId}
+          provider={selectedTask.provider}
+          costUsd={selectedTask.costUsd}
+        />
+      )}
+      {view === "trace" && taskId && !selectedTask?.traceId && <p>No trace available for this task.</p>}
+
+      {view === "costs" && <CostDashboard />}
+
+      {view !== "run" ? null : screenshots.length > 0 && (
         <div style={{ marginBottom: "1rem" }}>
           {screenshots.map((s, i) => (
             <div key={i} style={{ marginBottom: "1rem" }}>
@@ -309,22 +358,24 @@ export function App() {
         </div>
       )}
 
-      <pre
-        ref={terminalRef}
-        style={{
-          background: "#111",
-          color: "#0f0",
-          padding: "1rem",
-          borderRadius: 8,
-          height: 480,
-          overflow: "auto",
-          whiteSpace: "pre-wrap",
-          fontFamily: "monospace",
-          fontSize: 14,
-        }}
-      >
-        {events.map((ev) => formatEvent(ev)).join("\n")}
-      </pre>
+      {view === "run" && (
+        <pre
+          ref={terminalRef}
+          style={{
+            background: "#111",
+            color: "#0f0",
+            padding: "1rem",
+            borderRadius: 8,
+            height: 480,
+            overflow: "auto",
+            whiteSpace: "pre-wrap",
+            fontFamily: "monospace",
+            fontSize: 14,
+          }}
+        >
+          {events.map((ev) => formatEvent(ev)).join("\n")}
+        </pre>
+      )}
 
       <h2>Recent tasks</h2>
       <ul>
@@ -332,6 +383,8 @@ export function App() {
           <li key={t.id}>
             <code>{t.id}</code> — {t.repo} @ {t.branch} · {t.status}
             {t.prBranch && ` · ${t.prBranch}`}
+            {t.provider ? ` · ${t.provider}` : ""}
+            {typeof t.costUsd === "number" ? ` · $${t.costUsd.toFixed(4)}` : ""}
             {t.prUrl && (
               <span>
                 {" · "}

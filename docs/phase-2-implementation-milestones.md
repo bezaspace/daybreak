@@ -87,16 +87,19 @@ This document breaks the Phase 2 exit criteria into small, independently-demoabl
 
 **What it ships:** The local React dashboard can visualize the reasoning tree and total cost.
 
-- [ ] Add a trace view to `packages/ui/src/App.tsx` or a new route.
-  - Fetch `GET /api/tasks/:id/trace` or the Langfuse API directly.
-  - Render observations as a tree by `parentObservationId`.
-  - Color-code span kinds (LLM, tool, turn, compaction).
-  - Show per-node: model, provider, tokens, cost, latency.
-- [ ] Add a cost dashboard panel:
-  - Total cost per task.
-  - Provider breakdown.
-  - Aggregated daily/weekly spend (local state + Supabase query).
-- [ ] Update `formatEvent` and metrics box to show provider name and fallback status.
+- [x] Add a trace view in `packages/ui/src/TraceView.tsx` integrated into `App.tsx`.
+  - Fetches `GET /api/tasks/:id/trace`.
+  - Renders Langfuse observations as a tree by `parentObservationId`.
+  - Color-codes span kinds: LLM (blue), `tool:*` (orange), `turn` (green), `compaction` (purple), other (gray).
+  - Shows per-node: model, provider, tokens, cost, and latency.
+- [x] Add a cost dashboard in `packages/ui/src/CostDashboard.tsx`.
+  - Total cost across completed tasks.
+  - Provider breakdown table.
+  - Daily spend table (local aggregation from `/api/tasks`).
+- [x] Update `formatEvent` and metrics box to show provider name and fallback status.
+  - `provider_switched`/`fallback_applied` events are rendered with `from → to` and reason.
+  - `task_complete`/`task_failed` include the active provider and final cost.
+  - Metrics box shows the active provider and flags `(fallback)` when it differs from the configured primary provider.
 
 **Acceptance:**
 - Start a task from the UI; after completion, the trace tab shows the reasoning tree with per-step cost and latency.

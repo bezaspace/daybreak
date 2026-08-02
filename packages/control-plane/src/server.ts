@@ -155,6 +155,7 @@ app.get("/api/config", (c) => {
     maxCostUsd: config.maxCostUsd,
     compactionEnabled: config.compactionEnabled,
     e2bTemplate: config.e2bTemplate,
+    provider: config.llm.provider,
   });
 });
 
