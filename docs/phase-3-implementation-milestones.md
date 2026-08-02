@@ -98,11 +98,12 @@
 
 **What it ships:** Basic tenant isolation and rate limits without per-installation data.
 
-- Add a Supabase `workspaces` (or `github_senders`) stub table:
+- [x] Add a Supabase `workspaces` stub table:
   - `id`, `type` (`"repo"` or `"sender"`), `value` (`owner/repo` or `login`), `tasks_per_hour`, `created_at`, `updated_at`.
-- Add `tasks.sender_login` and `tasks.repo` and update `PersistedTask` / `Task` / `db.ts`.
-- Enforce per-repo and per-sender task-rate limits.
-- Document that per-installation multi-tenancy and the `installations` table are deferred to Phase 7 with the GitHub App migration.
+- [x] Add `tasks.workspace_id` (FK to `workspaces`) and update `PersistedTask` / `Task` / `db.ts`.
+- [x] Ensure `tasks.repo` and `tasks.github_sender` are populated by webhooks.
+- [x] Enforce per-repo and per-sender task-rate limits by looking up workspace `tasks_per_hour`.
+- [x] Document that per-installation multi-tenancy and the `installations` table are deferred to Phase 7 with the GitHub App migration.
 
 **Acceptance:**
 - Supabase schema matches the new types.

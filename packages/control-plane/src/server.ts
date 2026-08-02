@@ -19,6 +19,8 @@ import {
   updateTask,
   persistEvent,
   getEvents,
+  ensureWorkspace,
+  countTasksByWorkspace,
   type Task,
   type StreamEvent,
 } from "./db.js";
@@ -126,10 +128,10 @@ async function publishEvent(taskId: string, type: string, data: unknown) {
 
 const tasks = new Map<string, Task>();
 
-function taskFrom(body: { repo: string; branch: string; id?: string; prBranch?: string; triggerSource?: string; githubSender?: string; prNumber?: number; prompt?: string; status?: Task["status"] }): Task {
+function taskFrom(body: { repo: string; branch: string; id?: string; prBranch?: string; triggerSource?: string; githubSender?: string; prNumber?: number; prompt?: string; status?: Task["status"]; workspaceId?: string }): Task {
   const id = body.id ?? randomUUID();
   const prBranch = body.prBranch ?? `daybreak/${id}`;
-  return { id, repo: body.repo, branch: body.branch, prBranch, status: body.status ?? "running", startedAt: Date.now(), triggerSource: body.triggerSource, githubSender: body.githubSender, prNumber: body.prNumber, prompt: body.prompt };
+  return { id, repo: body.repo, branch: body.branch, prBranch, status: body.status ?? "running", startedAt: Date.now(), triggerSource: body.triggerSource, githubSender: body.githubSender, prNumber: body.prNumber, prompt: body.prompt, workspaceId: body.workspaceId };
 }
 
 async function syncEventsFromRedis(taskId: string) {
@@ -205,8 +207,8 @@ async function isDuplicateDelivery(deliveryId: string): Promise<boolean> {
 }
 
 async function spawnTask(spec: { repo: string; branch: string; prBranch?: string; prompt?: string; triggerSource?: string; githubSender?: string; prNumber?: number; maxTurns?: number; maxCostUsd?: number; maxWallClockMinutes?: number }): Promise<Task> {
-  await assertCanSpawn(spec.repo, spec.githubSender);
-  const task = taskFrom({ ...spec, status: "running" });
+  const { repoWorkspaceId } = await assertCanSpawn(spec.repo, spec.githubSender);
+  const task = taskFrom({ ...spec, status: "running", workspaceId: repoWorkspaceId });
   tasks.set(task.id, task);
   await persistTask(task);
 
@@ -361,34 +363,34 @@ async function validatePat(repoUrl: string, token: string): Promise<{ ok: boolea
   }
 }
 
-async function isRateLimited(repo: string, sender: string | undefined): Promise<boolean> {
-  const limit = config.githubWebhookRateLimit ?? 10;
+async function checkWorkspaceLimit(workspace: { id: string; tasksPerHour: number } | undefined, label: string): Promise<void> {
+  if (!workspace) return;
   const windowMs = 60 * 60 * 1000;
   const cutoff = Date.now() - windowMs;
-  const all = await getTasks();
-  let repoCount = 0;
-  let senderCount = 0;
-  for (const t of all) {
-    if (t.startedAt >= cutoff) {
-      if (t.repo === repo) repoCount++;
-      if (sender && t.githubSender === sender) senderCount++;
-    }
-    if (repoCount >= limit || senderCount >= limit) return true;
+  const count = await countTasksByWorkspace(workspace.id, cutoff);
+  if (count >= workspace.tasksPerHour) {
+    throw new TaskRejectedError(`rate limit exceeded for ${label}`, 429);
   }
-  return false;
 }
 
-async function assertCanSpawn(repo: string, sender: string | undefined): Promise<void> {
-  if (await isRateLimited(repo, sender)) {
-    throw new TaskRejectedError("rate limit exceeded for repo or sender", 429);
-  }
+async function assertCanSpawn(repo: string, sender: string | undefined): Promise<{ repoWorkspaceId?: string; senderWorkspaceId?: string }> {
   if (!config.githubToken) {
     throw new TaskRejectedError("GITHUB_TOKEN not configured", 500);
   }
+
+  const defaultLimit = config.githubWebhookRateLimit ?? 10;
+  const repoWorkspace = await ensureWorkspace("repo", repo, defaultLimit);
+  const senderWorkspace = sender ? await ensureWorkspace("sender", sender, defaultLimit) : undefined;
+
+  await checkWorkspaceLimit(repoWorkspace, `repo ${repo}`);
+  await checkWorkspaceLimit(senderWorkspace, `sender ${sender}`);
+
   const validation = await validatePat(repo, config.githubToken);
   if (!validation.ok) {
     throw new TaskRejectedError(validation.error || `missing PAT permissions: ${validation.missing?.join(", ") || "unknown"}`, 403);
   }
+
+  return { repoWorkspaceId: repoWorkspace?.id, senderWorkspaceId: senderWorkspace?.id };
 }
 
 async function findOriginalTask(repo: string, prNumber: number, prBranch: string): Promise<Task | undefined> {
@@ -422,7 +424,7 @@ function buildSpawnEnv(taskId: string, prBranch: string, repo: string, branch: s
 }
 
 async function runReview(spec: { repo: string; baseBranch: string; headBranch: string; prNumber: number; prompt: string; githubSender?: string }): Promise<Task> {
-  await assertCanSpawn(spec.repo, spec.githubSender);
+  const { repoWorkspaceId } = await assertCanSpawn(spec.repo, spec.githubSender);
   const repoUrl = spec.repo;
   const baseRef = spec.baseBranch;
   const headRef = spec.headBranch;
@@ -444,9 +446,10 @@ async function runReview(spec: { repo: string; baseBranch: string; headBranch: s
       githubSender: spec.githubSender,
       prompt: spec.prompt,
       status: "running",
+      workspaceId: repoWorkspaceId,
     });
   } else {
-    task = { ...originalTask, status: "running", prNumber: originalTask.prNumber ?? prNumber, prompt: spec.prompt };
+    task = { ...originalTask, status: "running", prNumber: originalTask.prNumber ?? prNumber, prompt: spec.prompt, workspaceId: repoWorkspaceId };
   }
   tasks.set(taskId, task);
   await persistTask(task);

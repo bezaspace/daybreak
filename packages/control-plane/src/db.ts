@@ -20,6 +20,7 @@ export interface PersistedTask {
   prompt?: string | null;
   sandbox_id?: string | null;
   keep_alive_until?: string | null;
+  workspace_id?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -53,6 +54,25 @@ export interface Task {
   prompt?: string;
   sandboxId?: string;
   keepAliveUntil?: number;
+  workspaceId?: string;
+}
+
+export interface PersistedWorkspace {
+  id: string;
+  type: string;
+  value: string;
+  tasks_per_hour: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface Workspace {
+  id: string;
+  type: "repo" | "sender";
+  value: string;
+  tasksPerHour: number;
+  createdAt?: number;
+  updatedAt?: number;
 }
 
 export interface StreamEvent {
@@ -91,6 +111,7 @@ function toTask(row: PersistedTask): Task {
     prompt: row.prompt ?? undefined,
     sandboxId: row.sandbox_id ?? undefined,
     keepAliveUntil: row.keep_alive_until ? new Date(row.keep_alive_until).getTime() : undefined,
+    workspaceId: row.workspace_id ?? undefined,
   };
 }
 
@@ -116,6 +137,7 @@ export async function persistTask(task: Task): Promise<boolean> {
     prompt: task.prompt ?? null,
     sandbox_id: task.sandboxId ?? null,
     keep_alive_until: task.keepAliveUntil ? new Date(task.keepAliveUntil).toISOString() : null,
+    workspace_id: task.workspaceId ?? null,
     updated_at: new Date().toISOString(),
   });
   if (error) {
@@ -136,6 +158,7 @@ export async function updateTask(id: string, updates: Partial<Task>): Promise<bo
   if (updates.traceId !== undefined) payload.trace_id = updates.traceId ?? null;
   if (updates.provider !== undefined) payload.provider = updates.provider ?? null;
   if (updates.costUsd !== undefined) payload.cost_usd = updates.costUsd ?? null;
+  if (updates.workspaceId !== undefined) payload.workspace_id = updates.workspaceId ?? null;
   const { error } = await supabase.from("tasks").update(payload).eq("id", id);
   if (error) {
     console.error("[db] updateTask error:", error.message);
@@ -172,6 +195,65 @@ export async function getTask(id: string): Promise<Task | undefined> {
     return undefined;
   }
   return toTask(data);
+}
+
+function toWorkspace(row: PersistedWorkspace): Workspace {
+  return {
+    id: row.id,
+    type: row.type as Workspace["type"],
+    value: row.value,
+    tasksPerHour: row.tasks_per_hour,
+    createdAt: row.created_at ? new Date(row.created_at).getTime() : undefined,
+    updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : undefined,
+  };
+}
+
+export async function getWorkspace(type: Workspace["type"], value: string): Promise<Workspace | undefined> {
+  const supabase = getSupabase();
+  if (!supabase) return undefined;
+  const { data, error } = await supabase
+    .from("workspaces")
+    .select("*")
+    .eq("type", type)
+    .eq("value", value)
+    .maybeSingle<PersistedWorkspace>();
+  if (error || !data) {
+    if (error) console.error("[db] getWorkspace error:", error.message);
+    return undefined;
+  }
+  return toWorkspace(data);
+}
+
+export async function ensureWorkspace(type: Workspace["type"], value: string, defaultTasksPerHour: number): Promise<Workspace | undefined> {
+  const supabase = getSupabase();
+  if (!supabase) return undefined;
+  const existing = await getWorkspace(type, value);
+  if (existing) return existing;
+  const { data, error } = await supabase
+    .from("workspaces")
+    .insert({ type, value, tasks_per_hour: defaultTasksPerHour })
+    .select("*")
+    .single<PersistedWorkspace>();
+  if (error || !data) {
+    if (error) console.error("[db] ensureWorkspace error:", error.message);
+    return undefined;
+  }
+  return toWorkspace(data);
+}
+
+export async function countTasksByWorkspace(workspaceId: string, since: number): Promise<number> {
+  const supabase = getSupabase();
+  if (!supabase) return 0;
+  const { count, error } = await supabase
+    .from("tasks")
+    .select("*", { count: "exact", head: true })
+    .eq("workspace_id", workspaceId)
+    .gte("started_at", new Date(since).toISOString());
+  if (error) {
+    console.error("[db] countTasksByWorkspace error:", error.message);
+    return 0;
+  }
+  return count ?? 0;
 }
 
 export async function persistEvent(taskId: string, event: StreamEvent): Promise<boolean> {
