@@ -11,6 +11,9 @@ export interface PersistedTask {
   ended_at?: string | null;
   exit_code?: number | null;
   pr_url?: string | null;
+  trace_id?: string | null;
+  provider?: string | null;
+  cost_usd?: number | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -35,6 +38,9 @@ export interface Task {
   endedAt?: number;
   exitCode?: number;
   prUrl?: string;
+  traceId?: string;
+  provider?: string;
+  costUsd?: number;
 }
 
 export interface StreamEvent {
@@ -64,6 +70,9 @@ function toTask(row: PersistedTask): Task {
     endedAt: row.ended_at ? new Date(row.ended_at).getTime() : undefined,
     exitCode: row.exit_code ?? undefined,
     prUrl: row.pr_url ?? undefined,
+    traceId: row.trace_id ?? undefined,
+    provider: row.provider ?? undefined,
+    costUsd: row.cost_usd ?? undefined,
   };
 }
 
@@ -80,6 +89,9 @@ export async function persistTask(task: Task): Promise<boolean> {
     ended_at: task.endedAt ? new Date(task.endedAt).toISOString() : null,
     exit_code: task.exitCode ?? null,
     pr_url: task.prUrl ?? null,
+    trace_id: task.traceId ?? null,
+    provider: task.provider ?? null,
+    cost_usd: task.costUsd ?? null,
     updated_at: new Date().toISOString(),
   });
   if (error) {
@@ -97,6 +109,9 @@ export async function updateTask(id: string, updates: Partial<Task>): Promise<bo
   if (updates.endedAt !== undefined) payload.ended_at = updates.endedAt ? new Date(updates.endedAt).toISOString() : null;
   if (updates.exitCode !== undefined) payload.exit_code = updates.exitCode ?? null;
   if (updates.prUrl !== undefined) payload.pr_url = updates.prUrl ?? null;
+  if (updates.traceId !== undefined) payload.trace_id = updates.traceId ?? null;
+  if (updates.provider !== undefined) payload.provider = updates.provider ?? null;
+  if (updates.costUsd !== undefined) payload.cost_usd = updates.costUsd ?? null;
   const { error } = await supabase.from("tasks").update(payload).eq("id", id);
   if (error) {
     console.error("[db] updateTask error:", error.message);

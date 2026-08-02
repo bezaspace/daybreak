@@ -45,11 +45,13 @@ export class TaskRunner {
   private toolSpans = new Map<string, Span>();
   private taskId?: string;
   private traceId?: string;
+  private activeProvider: string;
 
   constructor(config: DaybreakConfig) {
     this.config = config;
     this.safety = new SafetyMiddleware(config);
     this.metrics = new MetricsCollector(config.llmPricing);
+    this.activeProvider = config.llm.provider;
   }
 
   getTraceId(): string | undefined {
@@ -76,6 +78,7 @@ export class TaskRunner {
       this.config.llmFallback,
       {
         onProviderSwitch: (info) => {
+          this.activeProvider = info.to;
           this.onEvent?.({ type: "fallback_applied", ...info });
           this.onEvent?.({ type: "provider_switched", ...info });
         },
@@ -149,6 +152,7 @@ export class TaskRunner {
       metrics: this.metrics.finalize(),
       error: this.abortedReason,
       traceId: this.traceId,
+      provider: this.activeProvider,
     };
   }
 

@@ -177,6 +177,7 @@ async function main() {
       metrics: result.metrics,
       error: result.error,
       traceId: result.traceId,
+      provider: result.provider,
     });
 
     process.exitCode = result.success ? 0 : 1;

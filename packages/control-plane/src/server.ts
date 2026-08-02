@@ -6,7 +6,10 @@ import { Redis } from "@upstash/redis";
 import { loadConfig } from "@daybreak/shared";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { resolve } from "node:path";
+import { existsSync, mkdirSync } from "node:fs";
+import { appendFile, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { serve } from "@hono/node-server";
 import {
   getTasks,
@@ -67,6 +70,39 @@ function getRedis() {
     throw new Error("UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_TOKEN are required");
   }
   return new Redis({ url, token });
+}
+
+const LOG_DIR = join(tmpdir(), "daybreak-logs");
+function getLogPath(taskId: string) {
+  return join(LOG_DIR, `${taskId}.log`);
+}
+function ensureLogDir() {
+  if (!existsSync(LOG_DIR)) mkdirSync(LOG_DIR, { recursive: true });
+}
+
+async function appendLog(taskId: string, chunk: string) {
+  ensureLogDir();
+  await appendFile(getLogPath(taskId), chunk).catch(() => {});
+  try {
+    const redis = getRedis();
+    const key = `daybreak:logs:${taskId}`;
+    await redis.pipeline().rpush(key, chunk).ltrim(key, -1000, -1).exec();
+  } catch {
+    // Redis logging is best-effort.
+  }
+}
+
+function langfuseBasicAuthHeader(): string | undefined {
+  const config = loadConfig();
+  const publicKey = config.langfusePublicKey || process.env.LANGFUSE_PUBLIC_KEY;
+  const secretKey = config.langfuseSecretKey || process.env.LANGFUSE_SECRET_KEY;
+  if (!publicKey || !secretKey) return undefined;
+  return `Basic ${Buffer.from(`${publicKey}:${secretKey}`).toString("base64")}`;
+}
+
+function langfuseBaseUrl(): string {
+  const config = loadConfig();
+  return config.langfuseBaseUrl || process.env.LANGFUSE_BASE_URL || "https://cloud.langfuse.com";
 }
 
 async function publishToRedis(taskId: string, event: StreamEvent) {
@@ -184,7 +220,19 @@ app.post("/api/tasks", async (c) => {
     env.TASK_PROMPT = prompt;
   }
 
-  const child = spawn("pnpm", sandboxArgs, { cwd: repoRoot, env, stdio: "ignore", detached: true });
+  ensureLogDir();
+  const logPath = getLogPath(task.id);
+  await appendFile(logPath, `[${new Date().toISOString()}] task ${task.id} spawned\n`).catch(() => {});
+
+  const child = spawn("pnpm", sandboxArgs, { cwd: repoRoot, env, stdio: ["ignore", "pipe", "pipe"], detached: true });
+
+  function forwardLog(chunk: Buffer | string) {
+    const text = typeof chunk === "string" ? chunk : chunk.toString();
+    appendLog(task.id, text).catch(() => {});
+  }
+
+  if (child.stdout) child.stdout.on("data", forwardLog);
+  if (child.stderr) child.stderr.on("data", forwardLog);
 
   child.unref();
 
@@ -193,6 +241,24 @@ app.post("/api/tasks", async (c) => {
     task.exitCode = code ?? undefined;
     task.status = code === 0 ? "complete" : "failed";
     tasks.set(task.id, task);
+
+    await syncEventsFromRedis(task.id);
+    try {
+      const redis = getRedis();
+      const raw = await redis.lrange(`daybreak:stream:${task.id}`, 0, -1);
+      const final = raw
+        .map((item) => (typeof item === "string" ? (JSON.parse(item) as StreamEvent) : (item as StreamEvent)))
+        .find((e) => e.type === "task_complete" || e.type === "task_failed");
+      if (final?.data && typeof final.data === "object") {
+        const d = final.data as Record<string, unknown>;
+        const metrics = d.metrics as { estimatedCostUsd?: number } | undefined;
+        task.traceId = typeof d.traceId === "string" ? d.traceId : undefined;
+        task.provider = typeof d.provider === "string" ? d.provider : undefined;
+        task.costUsd = typeof metrics?.estimatedCostUsd === "number" ? metrics.estimatedCostUsd : undefined;
+      }
+    } catch (error) {
+      console.error(`[control-plane] failed to read final event for ${task.id}:`, error);
+    }
     await updateTask(task.id, task);
 
     if (task.status === "complete" && config.githubToken) {
@@ -254,6 +320,52 @@ app.get("/api/tasks/:id/stream", (c) => {
 
     clearInterval(heartbeat);
   });
+});
+
+app.get("/api/tasks/:id/trace", async (c) => {
+  const id = c.req.param("id");
+  const task = (await getTask(id)) ?? tasks.get(id);
+  if (!task?.traceId) {
+    return c.json({ error: "trace not found" }, 404);
+  }
+
+  const redirect = c.req.query("redirect") === "1";
+  const baseUrl = langfuseBaseUrl();
+  const traceUrl = new URL(`/trace/${task.traceId}`, baseUrl).toString();
+
+  if (redirect) {
+    return c.redirect(traceUrl);
+  }
+
+  const auth = langfuseBasicAuthHeader();
+  if (!auth) {
+    return c.json({ error: "Langfuse credentials not configured" }, 500);
+  }
+
+  const res = await fetch(`${baseUrl}/api/public/traces/${task.traceId}`, {
+    headers: { Authorization: auth },
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "unknown");
+    console.error(`[control-plane] trace fetch failed: ${res.status} ${text}`);
+    return c.json({ error: "failed to fetch trace from Langfuse" }, 502);
+  }
+
+  const trace = (await res.json()) as Record<string, unknown>;
+  return c.json({ trace, traceUrl });
+});
+
+app.get("/api/tasks/:id/logs", async (c) => {
+  const id = c.req.param("id");
+  const logPath = getLogPath(id);
+  try {
+    const text = await readFile(logPath, "utf8");
+    const max = 500_000;
+    return c.text(text.length > max ? `...${text.slice(-max)}` : text);
+  } catch {
+    return c.json({ error: "log not found" }, 404);
+  }
 });
 
 const port = Number(process.env.PORT || "8787");

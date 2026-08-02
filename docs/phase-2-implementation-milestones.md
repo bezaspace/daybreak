@@ -69,16 +69,17 @@ This document breaks the Phase 2 exit criteria into small, independently-demoabl
 
 **What it ships:** The control plane knows the trace ID and provider for each task and exposes them via the API.
 
-- [ ] Extend `packages/control-plane/src/db.ts` `Task`/`PersistedTask` to store `traceId`, `provider`, and `costUsd`.
-- [ ] In `server.ts`, when the runner exits, persist these fields if they are present in the final event payload.
-- [ ] Add `GET /api/tasks/:id/trace` that proxies/fetches the Langfuse trace for the task (or returns a redirect to Langfuse UI).
-- [ ] Capture runner stdout/stderr when spawning the sandbox (currently `stdio: "ignore"`) and redirect to a Redis log key or at least a local log file, so telemetry/fallback debugging is not blind.
-- [ ] Ensure the Langfuse keys are not exposed in API responses or logs.
+- [x] Extend `packages/control-plane/src/db.ts` `Task`/`PersistedTask` to store `traceId`, `provider`, and `costUsd`.
+- [x] In `server.ts`, when the runner exits, read the final `task_complete`/`task_failed` event from Redis and persist `traceId`, `provider`, and `costUsd` to the task record.
+- [x] Add `GET /api/tasks/:id/trace` that proxies/fetches the Langfuse trace for the task (or returns a redirect to Langfuse UI with `?redirect=1`).
+- [x] Add `GET /api/tasks/:id/logs` to expose the runner log file.
+- [x] Capture runner stdout/stderr when spawning the sandbox (`stdio: ["ignore", "pipe", "pipe"]`) and write them to a local log file and a Redis `daybreak:logs:<taskId>` list.
+- [x] Ensure the Langfuse keys are not exposed in API responses or logs; the server uses them only for the internal Langfuse API call.
 
 **Acceptance:**
 - `GET /api/tasks/:id` returns `traceId`, `provider`, and `costUsd` after a task finishes.
 - `GET /api/tasks/:id/trace` returns the trace JSON or a valid Langfuse URL.
-- Runner errors are visible somewhere other than the sandbox's ephemeral console.
+- Runner errors are visible in the local log file and Redis log key.
 
 ---
 
