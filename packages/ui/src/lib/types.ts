@@ -29,6 +29,17 @@ export interface Task {
   headSha?: string;
   checkRunId?: string;
   healAttempt?: number;
+  prompt?: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  taskId?: string;
+  role: "user" | "assistant" | "tool" | "system" | "artifact";
+  type: "text" | "tool_call" | "tool_result" | "approval_request" | "checkpoint" | "cost_alert" | "status" | "error";
+  content: unknown;
+  createdAt: number;
+  status?: "pending" | "running" | "complete" | "error";
 }
 
 export interface Screenshot {
