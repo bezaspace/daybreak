@@ -1,6 +1,6 @@
 # Daybreak: Chat-First UI Scope-Shift Plan
 
-**Status:** Draft — awaiting approval before implementation.  
+**Status:** Phase 1 complete — remaining phases in progress.  
 **Date:** 2026-08-03  
 **Scope:** A product-level pivot from the current dashboard-style UI to a three-pane, chat-first agent workspace. This document supersedes `UI_REVAMP_PLAN.md` for all future UI work, though the design-token and component foundation laid in Milestone 0 of that plan is preserved.  
 
@@ -273,12 +273,12 @@ Because this is a scope shift, the existing `UI_REVAMP_PLAN.md` milestones are r
 - Base UI + Tailwind + dark theme + two-pane shell.
 - Lint/typecheck/build green.
 
-### Phase 1 — Three-pane chat shell
+### Phase 1 — Three-pane chat shell (done)
 
-- Convert the two-pane layout to three-pane: collapsible left sidebar, center chat thread, right sandbox panel.
-- Add `ChatLayout`, `ConversationSidebar`, `ChatThread`, and `SandboxPanel` shells.
-- Keep the current Run/Costs/etc. views accessible but mark them legacy.
-- Build `Composer` with mode selector (Plan / Interactive / Autopilot) and simple repo/branch pickers.
+- [x] Convert the two-pane layout to three-pane: collapsible left sidebar, center chat thread, right sandbox panel.
+- [x] Add `ChatLayout`, `ConversationSidebar`, `ChatThread`, and `SandboxPanel` shells.
+- [x] Keep the current Run/Costs/etc. views accessible but mark them legacy.
+- [x] Build `Composer` with mode selector (Plan / Interactive / Autopilot) and simple repo/branch pickers.
 
 ### Phase 2 — Message model and persistence
 
