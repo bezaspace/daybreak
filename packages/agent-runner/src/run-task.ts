@@ -22,6 +22,7 @@ const parentTaskId = process.env.PARENT_TASK_ID || taskId;
 const prBranch = process.env.PR_BRANCH_NAME || `daybreak/${taskId}`;
 const autoApprove = process.env.AUTO_APPROVE !== "false";
 const pushAfterFix = process.env.PUSH_AFTER_FIX !== "false";
+const isHeal = process.env.HEAL_MODE === "true";
 const gitAskpassPath = process.env.GIT_ASKPASS || `${workDir}/.git-askpass.sh`;
 
 function getDefaultPrompt(): string {
@@ -208,9 +209,9 @@ async function main() {
     }
   } else {
     console.log(pc.bold("[run-task] cloning target repo..."));
-    if (process.env.REVIEW_MODE === "true") {
+    if (process.env.REVIEW_MODE === "true" || process.env.HEAL_MODE === "true") {
       if (existsSync(`${targetDir}/.git`)) {
-        console.log(pc.bold("[run-task] using existing repo for review..."));
+        console.log(pc.bold(isHeal ? "[run-task] using existing repo for heal..." : "[run-task] using existing repo for review..."));
         run(
           `git config user.name "Daybreak Bot" && git config user.email "daybreak@example.com" && git fetch origin && git checkout ${prBranch} && git pull origin ${prBranch}`,
           targetDir,
@@ -305,7 +306,13 @@ async function main() {
       }
     }
 
-    if (process.env.REVIEW_MODE === "true") {
+    if (isHeal) {
+      publisher.publish(result.success ? "heal_complete" : "heal_failed", {
+        success: result.success,
+        summary: result.summary,
+        error: result.error,
+      });
+    } else if (process.env.REVIEW_MODE === "true") {
       publisher.publish(result.success ? "review_complete" : "review_failed", {
         success: result.success,
         summary: result.summary,

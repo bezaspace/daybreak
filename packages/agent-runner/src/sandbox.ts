@@ -40,6 +40,7 @@ async function main() {
   const parentTaskId = getArg("--parent-task-id") || taskId;
   const connectId = getArg("--connect");
   const isReview = hasArg("--review");
+  const isHeal = hasArg("--heal");
   const keepAlive = hasArg("--keep-alive");
   const fallbackCreate = hasArg("--fallback-create");
   const keepAliveMs = config.reviewKeepAliveMs ?? 15 * 60 * 1000;
@@ -97,7 +98,8 @@ async function main() {
     PUSH_AFTER_FIX: String(pushAfterFix),
     PR_BRANCH_NAME: prBranch,
     TASK_PROMPT: taskPrompt || "",
-    REVIEW_MODE: String(isReview),
+    REVIEW_MODE: String(isReview || isHeal),
+    HEAL_MODE: String(isHeal),
     REWIND_TO_CHECKPOINT: rewindToCheckpoint || "",
     FORK_FROM_CHECKPOINT: forkFromCheckpoint || "",
     FORK_SOURCE_BRANCH: process.env.FORK_SOURCE_BRANCH || targetBranch,
@@ -132,7 +134,7 @@ async function main() {
         console.log(pc.bold(`[sandbox] connecting to ${connectId}...`));
         const sbx = await Sandbox.connect(connectId, { apiKey: config.e2bApiKey });
         console.log(pc.bold(`[sandbox] connected to ${sbx.sandboxId}`));
-        publisher.publish("sandbox_resumed", { sandboxId: sbx.sandboxId, taskId, repo: targetRepo, branch: targetBranch, prBranch, isReview });
+        publisher.publish("sandbox_resumed", { sandboxId: sbx.sandboxId, taskId, repo: targetRepo, branch: targetBranch, prBranch, isReview, isHeal });
         return sbx;
       } catch (error) {
         if (fallbackCreate) {
@@ -152,7 +154,7 @@ async function main() {
       envs: sandboxEnvs,
     });
     console.log(pc.bold(`[sandbox] created ${sbx.sandboxId} taskId=${taskId}`));
-    publisher.publish("sandbox_created", { sandboxId: sbx.sandboxId, taskId, repo: targetRepo, branch: targetBranch, prBranch, isReview });
+    publisher.publish("sandbox_created", { sandboxId: sbx.sandboxId, taskId, repo: targetRepo, branch: targetBranch, prBranch, isReview, isHeal });
     return sbx;
   }
 
@@ -210,7 +212,10 @@ async function main() {
     console.log(pc.bold("[sandbox] uploading agent bundle..."));
     await sandbox.files.write(REMOTE_PATH, bundle);
 
-    if (isReview) {
+    if (isHeal) {
+      console.log(pc.bold("[sandbox] running heal agent in sandbox..."));
+      publisher.publish("heal_task_start", { sandboxId: sandbox.sandboxId, taskId, repo: targetRepo, branch: targetBranch, prBranch });
+    } else if (isReview) {
       console.log(pc.bold("[sandbox] running review agent in sandbox..."));
       publisher.publish("review_task_start", { sandboxId: sandbox.sandboxId, taskId, repo: targetRepo, branch: targetBranch, prBranch });
     } else {

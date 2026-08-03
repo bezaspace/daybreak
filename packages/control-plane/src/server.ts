@@ -27,6 +27,7 @@ import {
   type Task,
   type StreamEvent,
 } from "./db.js";
+import { CiLogFetcher, CiLogParser, type CheckRunOutput } from "./ci-logs.js";
 
 const repoRoot = resolve(import.meta.dirname ?? process.cwd(), "../..");
 
@@ -858,6 +859,180 @@ async function runReview(spec: { repo: string; baseBranch: string; headBranch: s
   return task;
 }
 
+function buildCiHealPrompt(repoUrl: string, prNumber: number | undefined, headBranch: string, headSha: string, checkName: string, errorContext: string): string {
+  return `CI check '${checkName}' failed on PR #${prNumber ?? "unknown"} (branch ${headBranch}, commit ${headSha}) in ${repoUrl}:
+
+${errorContext || "No detailed error context was available."}
+
+Investigate the repo, reproduce the failure, apply the minimal fix, run the failing test command, and push a follow-up commit to branch ${headBranch}. Do not open a new PR.`;
+}
+
+async function countHealAttempts(repo: string, prNumber: number | undefined, prBranch: string): Promise<number> {
+  const inMemory = Array.from(tasks.values()).filter(
+    (t) => t.repo === repo && t.triggerSource === "check_run" && (t.prNumber === prNumber || t.prBranch === prBranch),
+  );
+  const db = await getTasks();
+  const dbMatches = db.filter(
+    (t) => t.repo === repo && t.triggerSource === "check_run" && (t.prNumber === prNumber || t.prBranch === prBranch),
+  );
+  const seen = new Set<string>();
+  for (const t of [...inMemory, ...dbMatches]) {
+    if (!seen.has(t.id)) {
+      seen.add(t.id);
+    }
+  }
+  return seen.size;
+}
+
+async function runHeal(spec: {
+  repo: string;
+  baseBranch: string;
+  headBranch: string;
+  prNumber?: number;
+  headSha?: string;
+  checkRunId?: string;
+  checkSuiteId?: string;
+  checkName?: string;
+  repoFullName?: string;
+  output?: CheckRunOutput;
+  githubSender?: string;
+  healAttempt: number;
+}): Promise<Task> {
+  const { repoWorkspaceId } = await assertCanSpawn(spec.repo, spec.githubSender);
+  const repoUrl = spec.repo;
+  const baseRef = spec.baseBranch;
+  const headRef = spec.headBranch;
+
+  const originalTask = await findOriginalTask(repoUrl, spec.prNumber ?? 0, headRef);
+
+  let errorContext = "";
+  let logBytes = 0;
+  let annotationsCount = 0;
+
+  const parsed = parseRepo(repoUrl);
+  if (parsed && config.githubToken && spec.checkRunId) {
+    try {
+      const fetcher = new CiLogFetcher(config.githubToken);
+      const annotations = await fetcher.fetchAnnotations(parsed.owner, parsed.repo, spec.checkRunId);
+      annotationsCount = annotations.length;
+
+      let logs = "";
+      try {
+        logs = await fetcher.fetchJobLogs(parsed.owner, parsed.repo, spec.checkRunId, config.maxCiLogBytes);
+      } catch (logErr) {
+        console.log(`[control-plane] failed to fetch job logs for ${spec.checkRunId}:`, logErr);
+      }
+      logBytes = logs.length;
+
+      const parser = new CiLogParser({ contextLines: config.ciLogContextLines });
+      errorContext = parser.parseErrorContext(logs, annotations, spec.output);
+    } catch (err) {
+      console.error("[control-plane] failed to build CI error context:", err);
+    }
+  } else if (spec.output) {
+    const parser = new CiLogParser({ contextLines: config.ciLogContextLines });
+    errorContext = parser.parseErrorContext("", [], spec.output);
+  }
+
+  const prompt = buildCiHealPrompt(repoUrl, spec.prNumber, headRef, spec.headSha || "", spec.checkName || "", errorContext);
+
+  const taskId = randomUUID();
+  const prBranch = originalTask?.prBranch ?? headRef;
+
+  const task = taskFrom({
+    id: taskId,
+    repo: repoUrl,
+    branch: baseRef,
+    prBranch,
+    prNumber: spec.prNumber,
+    triggerSource: "check_run",
+    githubSender: spec.githubSender,
+    prompt,
+    status: "running",
+    workspaceId: repoWorkspaceId,
+    parentTaskId: originalTask?.id,
+    headSha: spec.headSha,
+    checkRunId: spec.checkRunId,
+    healAttempt: spec.healAttempt,
+  });
+  tasks.set(taskId, task);
+  await persistTask(task);
+
+  await publishEvent(taskId, "ci_failure_received", {
+    checkRunId: spec.checkRunId,
+    checkSuiteId: spec.checkSuiteId,
+    checkName: spec.checkName,
+    headBranch: headRef,
+    headSha: spec.headSha,
+    prNumber: spec.prNumber,
+    repo: spec.repoFullName,
+    repoUrl,
+    healAttempt: spec.healAttempt,
+  });
+
+  await publishEvent(taskId, "ci_logs_fetched", {
+    checkRunId: spec.checkRunId,
+    headSha: spec.headSha,
+    annotationsCount,
+    logBytes,
+    errorContextLength: errorContext.length,
+  });
+
+  const sandboxArgs = [
+    "--filter",
+    "agent-runner",
+    "sandbox",
+    `--repo=${repoUrl}`,
+    `--branch=${baseRef}`,
+    `--task-id=${taskId}`,
+    `--pr-branch=${prBranch}`,
+    `--template=${config.e2bTemplate || "base"}`,
+    "--heal",
+    "--keep-alive",
+  ];
+
+  if (task.sandboxId && task.keepAliveUntil && Date.now() < task.keepAliveUntil) {
+    sandboxArgs.push(`--connect=${task.sandboxId}`, "--fallback-create");
+  }
+  if (prompt) {
+    sandboxArgs.push(`--prompt=${prompt}`);
+  }
+
+  const env = buildSpawnEnv(taskId, prBranch, repoUrl, baseRef);
+  env.TASK_PROMPT = prompt;
+  env.REVIEW_MODE = "true";
+  env.HEAL_MODE = "true";
+
+  ensureLogDir();
+  const logPath = getLogPath(taskId);
+  await appendFile(logPath, `[${new Date().toISOString()}] heal ${taskId} spawned\n`).catch(() => {});
+
+  const child = spawn("pnpm", sandboxArgs, { cwd: repoRoot, env, stdio: ["ignore", "pipe", "pipe"], detached: true });
+
+  function forwardLog(chunk: Buffer | string) {
+    const text = typeof chunk === "string" ? chunk : chunk.toString();
+    appendLog(taskId, text).catch(() => {});
+  }
+
+  if (child.stdout) child.stdout.on("data", forwardLog);
+  if (child.stderr) child.stderr.on("data", forwardLog);
+
+  child.unref();
+
+  child.on("exit", async (code) => {
+    await syncEventsFromRedis(taskId);
+    const t = tasks.get(taskId);
+    if (!t) return;
+    t.endedAt = Date.now();
+    t.exitCode = code ?? undefined;
+    t.status = code === 0 ? "complete" : "failed";
+    tasks.set(taskId, t);
+    await updateTask(taskId, t);
+  });
+
+  return task;
+}
+
 const config = loadConfig();
 
 const app = new Hono();
@@ -1032,30 +1207,27 @@ app.post(
         const checkRunId = typeof checkRun.id === "number" ? String(checkRun.id) : (typeof checkRun.id === "string" ? checkRun.id : "");
         const checkSuiteId = typeof checkSuite?.id === "number" ? String(checkSuite.id) : (typeof checkSuite?.id === "string" ? String(checkSuite.id) : "");
         const checkName = typeof checkRun.name === "string" ? checkRun.name : "";
+        const checkRunOutput = asRecord(checkRun.output) as CheckRunOutput | undefined;
 
-        const prompt = `CI check "${checkName}" failed on PR #${prNumber ?? "unknown"} in ${repoUrl} (branch: ${headBranch}, commit: ${headSha}). Self-heal task pending.`;
+        const healCount = await countHealAttempts(repoUrl, prNumber, headBranch);
+        if (healCount >= config.maxHealAttemptsPerPr) {
+          return c.json({ ok: true, note: "max heal attempts reached" }, 200);
+        }
+        const healAttempt = healCount + 1;
 
-        const task = await createPendingTask({
+        const task = await runHeal({
           repo: repoUrl,
-          branch: baseBranch,
-          prBranch: headBranch,
+          baseBranch,
+          headBranch,
           prNumber,
-          triggerSource: "check_run",
           headSha,
-          checkRunId,
-          healAttempt: 1,
-          prompt,
-        });
-
-        await publishEvent(task.id, "ci_failure_received", {
           checkRunId,
           checkSuiteId,
           checkName,
-          headBranch,
-          headSha,
-          prNumber,
-          repo: repoFullName,
-          repoUrl,
+          repoFullName,
+          output: checkRunOutput,
+          githubSender: typeof sender === "string" ? sender : undefined,
+          healAttempt,
         });
 
         return c.json({ taskId: task.id, repo: repoFullName, branch: baseBranch, prBranch: headBranch, headSha, status: task.status }, 202);

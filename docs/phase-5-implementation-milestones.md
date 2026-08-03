@@ -83,7 +83,7 @@ This document breaks the Phase 5 exit criteria into small, independently-demoabl
 
 **What it ships:** A failed `check_run` spawns a new branch-iteration task that reuses an existing sandbox when possible, otherwise creates a fresh one, and pushes a fix commit to the same PR branch.
 
-- [ ] Add `runHeal` in `packages/control-plane/src/server.ts` (analogous to `runReview`):
+- [x] Add `runHeal` in `packages/control-plane/src/server.ts` (analogous to `runReview`):
   - Look up the original task by `prBranch` (or `prNumber` + `repo`) using `findOriginalTask`.
   - Build a `heal_prompt` with `buildCiHealPrompt(repo, prNumber, headBranch, headSha, checkName, errorContext)`:
     ```
@@ -94,12 +94,12 @@ This document breaks the Phase 5 exit criteria into small, independently-demoabl
   - Create a new `Task` with `triggerSource: "check_run"`, `parentTaskId` = original task id, `prNumber`, `prBranch` = `headBranch`, `headSha`, `checkRunId`, `healAttempt` = (count of prior `check_run` tasks for this PR + 1).
   - Reuse the original sandbox if `sandboxId` exists and `keepAliveUntil > now` (same reconnect logic as `runReview`).
   - Otherwise spawn a fresh E2B sandbox and have `run-task.ts` clone the PR branch.
-- [ ] Extend `packages/agent-runner/src/run-task.ts` to support `HEAL_MODE`:
+- [x] Extend `packages/agent-runner/src/run-task.ts` to support `HEAL_MODE`:
   - Accept `HEAL_MODE=true` env and, when set, run in the same branch-iteration path as `REVIEW_MODE` (do not `rm -rf` / re-clone, pull the existing branch, push a new commit).
   - Emit `heal_task_start`, `heal_complete` / `heal_failed`, and `commit_pushed` events instead of `review_*` events when `HEAL_MODE` is true.
-- [ ] Extend `packages/control-plane/src/server.ts` to spawn heal tasks with `--review --heal` (or `--heal` if a new flag is added) and set `TASK_PROMPT`, `REVIEW_MODE=true`, and `HEAL_MODE=true`.
-- [ ] Update `packages/control-plane/src/db.ts` `toTask` / `persistTask` / `updateTask` to handle `headSha`, `checkRunId`, and `healAttempt`.
-- [ ] Emit `heal_task_start` and `ci_logs_fetched` stream events so the dashboard can show progress.
+- [x] Extend `packages/control-plane/src/server.ts` to spawn heal tasks with `--review --heal` (or `--heal` if a new flag is added) and set `TASK_PROMPT`, `REVIEW_MODE=true`, and `HEAL_MODE=true`.
+- [x] Update `packages/control-plane/src/db.ts` `toTask` / `persistTask` / `updateTask` to handle `headSha`, `checkRunId`, and `healAttempt`.
+- [x] Emit `heal_task_start` and `ci_logs_fetched` stream events so the dashboard can show progress.
 
 **Acceptance:**
 - A synthetic `check_run` failure creates a heal task that appears in `GET /api/tasks` with `triggerSource: "check_run"`.

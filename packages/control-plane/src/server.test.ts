@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import { Hono } from "hono";
 import { createHmac, randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
 
 vi.mock("node:child_process", () => {
   class MockEmitter {
@@ -245,14 +246,14 @@ describe("check_run webhooks", () => {
       };
     }
 
-    it("creates a pending heal task from a failed check_run on a daybreak branch", async () => {
+    it("creates a running heal task from a failed check_run on a daybreak branch", async () => {
       const branch = "daybreak/check-run-test-1";
       const res = await app.request("/api/webhooks/github", await makeGitHubWebhookPayload("check_run", makeCheckRunBody({ branch, conclusion: "failure" })));
       expect(res.status).toBe(202);
       const json = (await res.json()) as { taskId?: string; prBranch?: string; status?: string; headSha?: string };
       expect(json.taskId).toBeDefined();
       expect(json.prBranch).toBe(branch);
-      expect(json.status).toBe("pending");
+      expect(json.status).toBe("running");
       expect(json.headSha).toBe("abc123def456");
 
       const tasksRes = await app.request("/api/tasks");
@@ -261,9 +262,12 @@ describe("check_run webhooks", () => {
       const task = tasks.find((t) => t.repo === "https://github.com/bezaspace/daybreak-target.git" && t.prBranch === branch);
       expect(task).toBeDefined();
       expect(task?.triggerSource).toBe("check_run");
-      expect(task?.status).toBe("pending");
+      expect(["running", "complete", "failed"]).toContain(task?.status);
       expect(task?.headSha).toBe("abc123def456");
       expect(task?.checkRunId).toBe("987654321");
+
+      const healCall = (spawn as ReturnType<typeof vi.fn>).mock.calls.find((call: unknown[]) => (call[1] as string[])?.includes("--heal"));
+      expect(healCall).toBeDefined();
     });
 
     it("ignores a check_run with conclusion success", async () => {
