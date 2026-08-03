@@ -47,6 +47,9 @@ export interface DaybreakConfig {
   maxConcurrentTasks: number;
   queueWorkerPollMs: number;
   queueWorkerEnabled: boolean;
+  defaultTenantDailyCostUsd: number;
+  defaultTenantTasksPerHour: number;
+  defaultTenantMaxConcurrent: number;
 }
 
 const DEFAULT_MAX_TURNS = 40;
@@ -68,6 +71,9 @@ const DEFAULT_CI_LOG_CONTEXT_LINES = 20;
 const DEFAULT_HEAL_COOLDOWN_SECONDS = 60;
 const DEFAULT_MAX_CONCURRENT_TASKS = 2;
 const DEFAULT_QUEUE_WORKER_POLL_MS = 1000;
+const DEFAULT_TENANT_DAILY_COST_USD = 0.5;
+const DEFAULT_TENANT_TASKS_PER_HOUR = 10;
+const DEFAULT_TENANT_MAX_CONCURRENT = 2;
 
 export const DEFAULT_DENYLIST_PATTERNS: string[] = [
   ".env",
@@ -194,6 +200,9 @@ export function loadConfig(envPath?: string): DaybreakConfig {
     maxConcurrentTasks: parseIntEnv("DAYBREAK_MAX_CONCURRENT_TASKS", DEFAULT_MAX_CONCURRENT_TASKS),
     queueWorkerPollMs: parseIntEnv("DAYBREAK_QUEUE_WORKER_POLL_MS", DEFAULT_QUEUE_WORKER_POLL_MS),
     queueWorkerEnabled: get("DAYBREAK_QUEUE_WORKER_ENABLED") !== "false",
+    defaultTenantDailyCostUsd: parseFloatEnv("DAYBREAK_DEFAULT_TENANT_DAILY_COST_USD", DEFAULT_TENANT_DAILY_COST_USD),
+    defaultTenantTasksPerHour: parseIntEnv("DAYBREAK_DEFAULT_TENANT_TASKS_PER_HOUR", DEFAULT_TENANT_TASKS_PER_HOUR),
+    defaultTenantMaxConcurrent: parseIntEnv("DAYBREAK_DEFAULT_TENANT_MAX_CONCURRENT", DEFAULT_TENANT_MAX_CONCURRENT),
   };
 }
 

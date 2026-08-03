@@ -19,8 +19,6 @@ import {
   updateTask,
   persistEvent,
   getEvents,
-  ensureWorkspace,
-  countTasksByWorkspace,
   listCheckpoints,
   getCheckpoint,
   updateCheckpoint,
@@ -33,6 +31,8 @@ import {
 import { CiLogFetcher, CiLogParser, type CheckRunOutput } from "./ci-logs.js";
 import { TaskQueue, type TaskSpec } from "./queue.js";
 import { createIdempotencyKey, IdempotencyStore } from "./idempotency.js";
+import { TaskRejectedError } from "./errors.js";
+import { TenantService, type Tenant } from "./tenants.js";
 
 const repoRoot = resolve(import.meta.dirname ?? process.cwd(), "../..");
 
@@ -138,10 +138,10 @@ async function publishEvent(taskId: string, type: string, data: unknown) {
 const tasks = new Map<string, Task>();
 const rewindingTasks = new Set<string>();
 
-function taskFrom(body: { repo: string; branch: string; id?: string; prBranch?: string; triggerSource?: string; githubSender?: string; prNumber?: number; prompt?: string; status?: Task["status"]; workspaceId?: string; parentTaskId?: string; parentCheckpointId?: string; headSha?: string; checkRunId?: string; healAttempt?: number }): Task {
+function taskFrom(body: { repo: string; branch: string; id?: string; prBranch?: string; triggerSource?: string; githubSender?: string; prNumber?: number; prompt?: string; status?: Task["status"]; workspaceId?: string; tenantId?: string; parentTaskId?: string; parentCheckpointId?: string; headSha?: string; checkRunId?: string; healAttempt?: number }): Task {
   const id = body.id ?? randomUUID();
   const prBranch = body.prBranch ?? `daybreak/${id}`;
-  return { id, repo: body.repo, branch: body.branch, prBranch, status: body.status ?? "running", startedAt: Date.now(), triggerSource: body.triggerSource, githubSender: body.githubSender, prNumber: body.prNumber, prompt: body.prompt, workspaceId: body.workspaceId, parentTaskId: body.parentTaskId, parentCheckpointId: body.parentCheckpointId, headSha: body.headSha, checkRunId: body.checkRunId, healAttempt: body.healAttempt };
+  return { id, repo: body.repo, branch: body.branch, prBranch, status: body.status ?? "running", startedAt: Date.now(), triggerSource: body.triggerSource, githubSender: body.githubSender, prNumber: body.prNumber, prompt: body.prompt, workspaceId: body.workspaceId, tenantId: body.tenantId, parentTaskId: body.parentTaskId, parentCheckpointId: body.parentCheckpointId, headSha: body.headSha, checkRunId: body.checkRunId, healAttempt: body.healAttempt };
 }
 
 async function syncEventsFromRedis(taskId: string) {
@@ -220,9 +220,12 @@ function buildReviewPrompt(repoUrl: string, prNumber: number, baseBranch: string
 
 async function executeTask(task: Task): Promise<void> {
   try {
-    const { repoWorkspaceId } = await assertCanSpawn(task.repo, task.githubSender);
-    task.workspaceId = repoWorkspaceId;
-    await updateTask(task.id, { workspaceId: repoWorkspaceId });
+    if (config.githubToken) {
+      const validation = await validatePat(task.repo, config.githubToken);
+      if (!validation.ok) {
+        throw new TaskRejectedError(validation.error || `missing PAT permissions: ${validation.missing?.join(", ") || "unknown"}`, 403);
+      }
+    }
   } catch (error) {
     console.error(`[control-plane] task ${task.id} rejected:`, error);
     task.status = "failed";
@@ -288,6 +291,10 @@ async function finalizeTask(task: Task, code: number | null, shouldCreatePr: boo
   task.status = code === 0 ? "complete" : "failed";
   tasks.set(task.id, task);
   await updateTask(task.id, task);
+  if (task.tenantId) {
+    TenantService.recordTaskStatus(task.tenantId, task.id, task.status);
+    if (task.costUsd) TenantService.recordTaskCost(task.tenantId, task.costUsd);
+  }
 
   if (shouldCreatePr && task.status === "complete" && config.githubToken) {
     const pr = await createPullRequest(task.repo, task.prBranch, task.branch, config.githubToken);
@@ -492,8 +499,13 @@ async function spawnFork(
     parentTaskId: parent.id,
     parentCheckpointId: checkpoint.id,
     triggerSource: "fork",
+    tenantId: parent.tenantId,
   });
   tasks.set(child.id, child);
+  if (child.tenantId) {
+    TenantService.recordTaskCreation(child.tenantId, child.id);
+    TenantService.recordTaskStatus(child.tenantId, child.id, "running");
+  }
   await persistTask(child);
 
   if (idempotencyKey) {
@@ -618,13 +630,7 @@ async function spawnFork(
   return child;
 }
 
-class TaskRejectedError extends Error {
-  status: number;
-  constructor(message: string, status: number) {
-    super(message);
-    this.status = status;
-  }
-}
+
 
 async function validatePat(repoUrl: string, token: string): Promise<{ ok: boolean; missing?: string[]; error?: string }> {
   const parsed = parseRepo(repoUrl);
@@ -725,36 +731,6 @@ async function promoteTask(task: Task): Promise<{ url: string; number: number } 
   }
 
   return pr;
-}
-
-async function checkWorkspaceLimit(workspace: { id: string; tasksPerHour: number } | undefined, label: string): Promise<void> {
-  if (!workspace) return;
-  const windowMs = 60 * 60 * 1000;
-  const cutoff = Date.now() - windowMs;
-  const count = await countTasksByWorkspace(workspace.id, cutoff);
-  if (count >= workspace.tasksPerHour) {
-    throw new TaskRejectedError(`rate limit exceeded for ${label}`, 429);
-  }
-}
-
-async function assertCanSpawn(repo: string, sender: string | undefined): Promise<{ repoWorkspaceId?: string; senderWorkspaceId?: string }> {
-  if (!config.githubToken) {
-    throw new TaskRejectedError("GITHUB_TOKEN not configured", 500);
-  }
-
-  const defaultLimit = config.githubWebhookRateLimit ?? 10;
-  const repoWorkspace = await ensureWorkspace("repo", repo, defaultLimit);
-  const senderWorkspace = sender ? await ensureWorkspace("sender", sender, defaultLimit) : undefined;
-
-  await checkWorkspaceLimit(repoWorkspace, `repo ${repo}`);
-  await checkWorkspaceLimit(senderWorkspace, `sender ${sender}`);
-
-  const validation = await validatePat(repo, config.githubToken);
-  if (!validation.ok) {
-    throw new TaskRejectedError(validation.error || `missing PAT permissions: ${validation.missing?.join(", ") || "unknown"}`, 403);
-  }
-
-  return { repoWorkspaceId: repoWorkspace?.id, senderWorkspaceId: senderWorkspace?.id };
 }
 
 async function findOriginalTask(repo: string, prNumber: number, prBranch: string): Promise<Task | undefined> {
@@ -1071,7 +1047,14 @@ app.get("/api/tasks", async (c) => {
   for (const task of tasks.values()) {
     merged.set(task.id, task);
   }
-  return c.json(Array.from(merged.values()));
+  let all = Array.from(merged.values());
+
+  const tenantId = c.req.header("x-daybreak-tenant-id");
+  if (tenantId) {
+    all = all.filter((t) => t.tenantId === tenantId);
+  }
+
+  return c.json(all);
 });
 
 app.get("/api/queue/status", async (c) => {
@@ -1153,6 +1136,11 @@ app.post("/api/tasks", async (c) => {
   const idempotencyKey = c.req.header("idempotency-key") || createIdempotencyKey([repo, branch, prompt ?? "", "dashboard"].join("|"));
 
   try {
+    const tenant = await TenantService.getOrCreateTenantForRequest(c, { repo });
+    const userId = c.req.header("x-daybreak-user-id") ?? undefined;
+    const role = c.req.header("x-daybreak-role") ?? (await TenantService.resolveUserRole(c, tenant.id)) ?? "operator";
+    await TenantService.assertCanCreateTask(tenant, userId, role, undefined);
+
     const task = await queue.enqueue(
       {
         repo,
@@ -1162,6 +1150,7 @@ app.post("/api/tasks", async (c) => {
         maxTurns: body.maxTurns,
         maxCostUsd: body.maxCostUsd,
         maxWallClockMinutes: body.maxWallClockMinutes,
+        tenantId: tenant.id,
       },
       { idempotencyKey },
     );
@@ -1213,6 +1202,14 @@ app.post(
     }
 
     const sender = typeof payload.sender === "object" && payload.sender !== null ? asRecord(payload.sender)?.login : undefined;
+    const ownerRecord = typeof repository?.owner === "object" && repository.owner !== null ? asRecord(repository.owner) : undefined;
+    const owner = typeof ownerRecord?.login === "string" ? ownerRecord.login : undefined;
+    const installation = asRecord(payload.installation);
+    const installationId = typeof installation?.id === "number" ? String(installation.id) : (typeof installation?.id === "string" ? installation.id : undefined);
+
+    const tenant = await TenantService.getOrCreateTenantForRequest(c, { owner, installationId, repo: repoUrl });
+    const userId = c.req.header("x-daybreak-user-id") ?? (typeof sender === "string" ? sender : "anonymous");
+    const role = c.req.header("x-daybreak-role") ?? (await TenantService.resolveUserRole(c, tenant.id)) ?? "operator";
 
     switch (event) {
       case "ping": {
@@ -1312,6 +1309,8 @@ app.post(
           }
         }
 
+        await TenantService.assertCanCreateTask(tenant, userId, role, undefined);
+
         const task = await queue.enqueue({
           repo: repoUrl,
           branch: baseBranch,
@@ -1328,7 +1327,9 @@ app.post(
           parentTaskId: originalTask?.id,
           metadata: { checkSuiteId, checkName, output: checkRunOutput as Record<string, unknown> },
           idempotencyKey: checkRunIdempotencyKey,
+          tenantId: tenant.id,
         });
+
 
         return c.json({ taskId: task.id, repo: repoFullName, branch: baseBranch, prBranch: headBranch, headSha, status: task.status }, 202);
       }
@@ -1355,7 +1356,9 @@ app.post(
         const issuePrBranch = `daybreak/${randomUUID()}`;
         const prompt = buildIssuePrompt(repoUrl, defaultBranch, issuePrBranch, { title: issueTitle, body: issueBody }, stripMention(commentBody));
         const idempotencyKey = `github-delivery:${deliveryId}`;
-        const task = await queue.enqueue({ repo: repoUrl, branch: defaultBranch, prBranch: issuePrBranch, prompt, triggerSource: "issue_comment", githubSender: typeof sender === "string" ? sender : undefined }, { idempotencyKey });
+        await TenantService.assertCanCreateTask(tenant, userId, role, undefined);
+        const task = await queue.enqueue({ repo: repoUrl, branch: defaultBranch, prBranch: issuePrBranch, prompt, triggerSource: "issue_comment", githubSender: typeof sender === "string" ? sender : undefined, tenantId: tenant.id }, { idempotencyKey });
+
         return c.json({ taskId: task.id, repo: repoFullName, branch: defaultBranch, status: task.status }, 202);
       }
       case "pull_request_review_comment": {
@@ -1382,6 +1385,7 @@ app.post(
         const prBranch = reviewOriginalTask?.prBranch ?? headRef;
         const commentId = typeof comment?.id === "number" ? String(comment.id) : (typeof comment?.id === "string" ? comment.id : "");
         const idempotencyKey = `review:${repoFullName}:${prNumber}:${commentId}`;
+        await TenantService.assertCanCreateTask(tenant, userId, role, undefined);
         const task = await queue.enqueue({
           repo: repoUrl,
           branch: baseRef,
@@ -1393,7 +1397,9 @@ app.post(
           sandboxId: reviewOriginalTask?.sandboxId,
           keepAliveUntil: reviewOriginalTask?.keepAliveUntil,
           parentTaskId: reviewOriginalTask?.id,
+          tenantId: tenant.id,
         }, { idempotencyKey });
+
         return c.json({ taskId: task.id, repo: repoFullName, branch: baseRef, prBranch, status: task.status }, 202);
       }
       case "pull_request_review": {
@@ -1420,6 +1426,7 @@ app.post(
         const prBranch = prReviewOriginalTask?.prBranch ?? headRef;
         const reviewId = typeof review?.id === "number" ? String(review.id) : (typeof review?.id === "string" ? review.id : "");
         const idempotencyKey = `review:${repoFullName}:${prNumber}:${reviewId}`;
+        await TenantService.assertCanCreateTask(tenant, userId, role, undefined);
         const task = await queue.enqueue({
           repo: repoUrl,
           branch: baseRef,
@@ -1431,7 +1438,9 @@ app.post(
           sandboxId: prReviewOriginalTask?.sandboxId,
           keepAliveUntil: prReviewOriginalTask?.keepAliveUntil,
           parentTaskId: prReviewOriginalTask?.id,
+          tenantId: tenant.id,
         }, { idempotencyKey });
+
         return c.json({ taskId: task.id, repo: repoFullName, branch: baseRef, prBranch, status: task.status }, 202);
       }
       default: {

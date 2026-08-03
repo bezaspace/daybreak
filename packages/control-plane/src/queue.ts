@@ -4,6 +4,7 @@ import { claimNextPendingTask, getSupabase, getTask, persistTask, updateTask } f
 import { IdempotencyStore, getExistingTask } from "./idempotency.js";
 import { RetryClassifier, RetryScheduler } from "./retry.js";
 import { insertDeadLetterTask } from "./db.js";
+import { TenantService } from "./tenants.js";
 
 export interface TaskSpec {
   repo: string;
@@ -30,6 +31,7 @@ export interface TaskSpec {
   idempotencyKey?: string;
   retryCount?: number;
   maxRetries?: number;
+  tenantId?: string;
 }
 
 export interface TaskQueueOptions {
@@ -74,6 +76,7 @@ function buildTask(spec: TaskSpec): Task {
     idempotencyKey: spec.idempotencyKey,
     retryCount: spec.retryCount ?? 0,
     maxRetries: spec.maxRetries ?? 2,
+    tenantId: spec.tenantId,
   };
 }
 
@@ -127,6 +130,9 @@ export class TaskQueue {
     if (!persisted && !getSupabase()) {
       this.pending.push(task);
     }
+    if (task.tenantId) {
+      TenantService.recordTaskCreation(task.tenantId, task.id);
+    }
     await this.onEvent(task.id, "task_pending", {
       repo: task.repo,
       branch: task.branch,
@@ -179,6 +185,7 @@ export class TaskQueue {
       while (this.running.size < this.maxConcurrent) {
         const task = await this.claimNext();
         if (!task) break;
+        if (task.tenantId) TenantService.recordTaskStatus(task.tenantId, task.id, "running");
         this.running.add(task.id);
         this.process(task);
       }
@@ -201,6 +208,7 @@ export class TaskQueue {
       const [task] = this.pending.splice(index, 1);
       task.status = "running";
       task.claimedAt = Date.now();
+      if (task.tenantId) TenantService.recordTaskStatus(task.tenantId, task.id, "running");
       await updateTask(task.id, { status: "running", claimedAt: task.claimedAt });
       return task;
     }
@@ -220,6 +228,7 @@ export class TaskQueue {
           task.nextRetryAt = RetryScheduler.nextRetryAt(task.retryCount);
           task.status = "retry_scheduled";
           task.endedAt = undefined;
+          if (task.tenantId) TenantService.recordTaskStatus(task.tenantId, task.id, "retry_scheduled");
           await updateTask(task.id, {
             retryCount: task.retryCount,
             lastError: task.lastError,
@@ -242,6 +251,7 @@ export class TaskQueue {
         task.status = "failed";
         task.endedAt = Date.now();
         task.lastError = message;
+        if (task.tenantId) TenantService.recordTaskStatus(task.tenantId, task.id, "failed");
         await updateTask(task.id, { status: "failed", endedAt: task.endedAt, lastError: task.lastError });
         await this.onEvent(task.id, "task_failed", { error: message });
         await this.onEvent(task.id, "dead_letter", { error: message });

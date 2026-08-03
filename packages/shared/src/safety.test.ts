@@ -22,6 +22,9 @@ const config: DaybreakConfig = {
   maxConcurrentTasks: 2,
   queueWorkerPollMs: 1000,
   queueWorkerEnabled: true,
+  defaultTenantDailyCostUsd: 0.5,
+  defaultTenantTasksPerHour: 10,
+  defaultTenantMaxConcurrent: 2,
 };
 
 describe("isSensitivePath", () => {

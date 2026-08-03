@@ -25,6 +25,7 @@ export interface PersistedTask {
   sandbox_id?: string | null;
   keep_alive_until?: string | null;
   workspace_id?: string | null;
+  tenant_id?: string | null;
   head_checkpoint_id?: string | null;
   root_checkpoint_id?: string | null;
   parent_task_id?: string | null;
@@ -74,6 +75,7 @@ export interface Task {
   sandboxId?: string;
   keepAliveUntil?: number;
   workspaceId?: string;
+  tenantId?: string;
   headCheckpointId?: string;
   rootCheckpointId?: string;
   parentTaskId?: string;
@@ -154,6 +156,7 @@ function toTask(row: PersistedTask): Task {
     sandboxId: row.sandbox_id ?? undefined,
     keepAliveUntil: row.keep_alive_until ? new Date(row.keep_alive_until).getTime() : undefined,
     workspaceId: row.workspace_id ?? undefined,
+    tenantId: row.tenant_id ?? undefined,
     headCheckpointId: row.head_checkpoint_id ?? undefined,
     rootCheckpointId: row.root_checkpoint_id ?? undefined,
     parentTaskId: row.parent_task_id ?? undefined,
@@ -195,6 +198,7 @@ export async function persistTask(task: Task): Promise<boolean> {
     sandbox_id: task.sandboxId ?? null,
     keep_alive_until: task.keepAliveUntil ? new Date(task.keepAliveUntil).toISOString() : null,
     workspace_id: task.workspaceId ?? null,
+    tenant_id: task.tenantId ?? null,
     head_checkpoint_id: task.headCheckpointId ?? null,
     root_checkpoint_id: task.rootCheckpointId ?? null,
     parent_task_id: task.parentTaskId ?? null,
@@ -231,6 +235,7 @@ export async function updateTask(id: string, updates: Partial<Task>): Promise<bo
   if (updates.provider !== undefined) payload.provider = updates.provider ?? null;
   if (updates.costUsd !== undefined) payload.cost_usd = updates.costUsd ?? null;
   if (updates.workspaceId !== undefined) payload.workspace_id = updates.workspaceId ?? null;
+  if (updates.tenantId !== undefined) payload.tenant_id = updates.tenantId ?? null;
   if (updates.headCheckpointId !== undefined) payload.head_checkpoint_id = updates.headCheckpointId ?? null;
   if (updates.rootCheckpointId !== undefined) payload.root_checkpoint_id = updates.rootCheckpointId ?? null;
   if (updates.parentTaskId !== undefined) payload.parent_task_id = updates.parentTaskId ?? null;

@@ -181,6 +181,10 @@ function formatEvent(event: StreamEvent): string {
     const data = event.data as { childTaskId?: string };
     return `[${time}] branch_abandoned: child=${data.childTaskId?.slice(0, 8) ?? "-"}`;
   }
+  if (event.type === "budget_exceeded" || event.type === "rate_limited") {
+    const data = event.data as { reason?: string };
+    return `[${time}] ${event.type}: ${data.reason || ""}`;
+  }
   if (event.type === "commit_pushed") {
     const data = event.data as { prBranch?: string };
     return `[${time}] commit_pushed: ${data.prBranch || "-"}`;
@@ -219,9 +223,20 @@ export function App() {
   const terminalRef = useRef<HTMLPreElement>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [view, setView] = useState<"run" | "trace" | "costs" | "time-travel" | "ci-heal" | "dead-letter">("run");
+  const [tenantId, setTenantId] = useState("");
+  const [role, setRole] = useState("operator");
+  const [userId, setUserId] = useState("");
+
+  function tenantHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {};
+    if (tenantId) headers["X-Daybreak-Tenant-Id"] = tenantId;
+    if (role) headers["X-Daybreak-Role"] = role;
+    if (userId) headers["X-Daybreak-User-Id"] = userId;
+    return headers;
+  }
 
   function loadTasks() {
-    fetch("/api/tasks")
+    fetch("/api/tasks", { headers: tenantHeaders() })
       .then((r) => r.json())
       .then((data) => setTasks(Array.isArray(data) ? data : []))
       .catch(() => {});
@@ -333,7 +348,7 @@ export function App() {
     if (options?.maxWallClockMinutes !== undefined) body.maxWallClockMinutes = options.maxWallClockMinutes;
     const res = await fetch("/api/tasks", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...tenantHeaders() },
       body: JSON.stringify(body),
     });
     const data = await res.json();
@@ -416,6 +431,28 @@ export function App() {
           {status === "starting" ? "Starting..." : "Run task"}
         </button>
       </form>
+
+      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem" }}>
+        <input
+          type="text"
+          value={tenantId}
+          onChange={(e) => setTenantId(e.target.value)}
+          placeholder="Tenant ID (optional)"
+          style={{ flex: 1, minWidth: 200, padding: "0.5rem" }}
+        />
+        <select value={role} onChange={(e) => setRole(e.target.value)} style={{ padding: "0.5rem" }}>
+          <option value="operator">operator</option>
+          <option value="viewer">viewer</option>
+          <option value="admin">admin</option>
+        </select>
+        <input
+          type="text"
+          value={userId}
+          onChange={(e) => setUserId(e.target.value)}
+          placeholder="User ID (optional)"
+          style={{ width: 150, padding: "0.5rem" }}
+        />
+      </div>
 
       {taskId && (
         <p style={{ color: "#666" }}>
