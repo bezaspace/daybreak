@@ -1,4 +1,8 @@
 import { useEffect, useState } from "react";
+import { Button } from "./components/base/Button.js";
+import { Card, CardContent, CardHeader, CardTitle } from "./components/base/Card.js";
+import { Loader2 } from "lucide-react";
+import type { Config } from "./lib/types.js";
 
 interface CleanupResult {
   type: string;
@@ -6,13 +10,6 @@ interface CleanupResult {
   completedAt: number;
   deletedCount: number;
   details: Record<string, unknown>;
-}
-
-interface Config {
-  branchTtlDays?: number;
-  sandboxIdleTtlMinutes?: number;
-  dataRetentionDays?: number;
-  cleanupEnabled?: boolean;
 }
 
 export function CleanupView() {
@@ -47,66 +44,59 @@ export function CleanupView() {
   }
 
   return (
-    <div>
-      <h2>Cleanup</h2>
+    <div className="space-y-4">
+      <h2 className="text-lg font-semibold text-db-text">Cleanup</h2>
       {config && (
-        <div style={{ color: "#666", fontSize: 14, marginBottom: "1rem" }}>
+        <p className="text-sm text-db-text-secondary">
           Branch TTL: {config.branchTtlDays} days · Sandbox idle TTL: {config.sandboxIdleTtlMinutes} min · Data retention: {config.dataRetentionDays} days ·{" "}
           {config.cleanupEnabled ? "enabled" : "disabled"}
-        </div>
+        </p>
       )}
-      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem" }}>
-        <button type="button" disabled={loading} onClick={() => run("branches", true)}>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="outline" size="sm" disabled={loading} onClick={() => run("branches", true)}>
+          {loading && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
           Dry-run branches
-        </button>
-        <button type="button" disabled={loading} onClick={() => run("branches", false)}>
+        </Button>
+        <Button variant="outline" size="sm" disabled={loading} onClick={() => run("branches", false)}>
           Clean branches
-        </button>
-        <button type="button" disabled={loading} onClick={() => run("sandboxes", true)}>
+        </Button>
+        <Button variant="outline" size="sm" disabled={loading} onClick={() => run("sandboxes", true)}>
           Dry-run sandboxes
-        </button>
-        <button type="button" disabled={loading} onClick={() => run("sandboxes", false)}>
+        </Button>
+        <Button variant="outline" size="sm" disabled={loading} onClick={() => run("sandboxes", false)}>
           Clean sandboxes
-        </button>
-        <button type="button" disabled={loading} onClick={() => run("data", true)}>
+        </Button>
+        <Button variant="outline" size="sm" disabled={loading} onClick={() => run("data", true)}>
           Dry-run data retention
-        </button>
-        <button type="button" disabled={loading} onClick={() => run("data", false)}>
+        </Button>
+        <Button variant="outline" size="sm" disabled={loading} onClick={() => run("data", false)}>
           Clean data retention
-        </button>
-        <button type="button" disabled={loading} onClick={() => run("all", true)}>
+        </Button>
+        <Button variant="secondary" size="sm" disabled={loading} onClick={() => run("all", true)}>
           Dry-run all
-        </button>
-        <button type="button" disabled={loading} onClick={() => run("all", false)}>
+        </Button>
+        <Button variant="danger" size="sm" disabled={loading} onClick={() => run("all", false)}>
           Run all cleanup
-        </button>
+        </Button>
       </div>
       {lastSummary && (
-        <div style={{ background: "#f6f6f6", padding: "1rem", borderRadius: 8, marginBottom: "1rem" }}>
-          <strong>Last cleanup summary</strong>
-          <ul>
-            {lastSummary.map((r, i) => (
-              <li key={i}>
-                {r.type}: {r.deletedCount} deleted ({formatDuration(r.completedAt - r.startedAt)})
-              </li>
-            ))}
-          </ul>
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Last cleanup summary</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ul className="list-inside list-disc text-sm text-db-text-secondary">
+              {lastSummary.map((r, i) => (
+                <li key={i}>
+                  {r.type}: {r.deletedCount} deleted ({formatDuration(r.completedAt - r.startedAt)})
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
       )}
       {results && (
-        <pre
-          style={{
-            background: "#111",
-            color: "#0f0",
-            padding: "1rem",
-            borderRadius: 8,
-            maxHeight: 400,
-            overflow: "auto",
-            whiteSpace: "pre-wrap",
-            fontFamily: "monospace",
-            fontSize: 14,
-          }}
-        >
+        <pre className="h-[25rem] overflow-auto whitespace-pre-wrap rounded-lg border border-db-border bg-black p-4 font-mono text-sm leading-relaxed text-green-400 scrollbar-thin">
           {JSON.stringify(results, null, 2)}
         </pre>
       )}

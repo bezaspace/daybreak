@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { Button } from "./components/base/Button.js";
+import { Badge } from "./components/base/Badge.js";
 
 interface DeadLetterTask {
   id: string;
@@ -39,20 +41,25 @@ export function DeadLetterView() {
   }
 
   return (
-    <div style={{ marginBottom: "1rem" }}>
-      <h2>Dead Letter</h2>
+    <div className="space-y-4">
+      <h2 className="text-lg font-semibold text-db-text">Dead Letter</h2>
       {items.length === 0 ? (
-        <p>No dead-letter tasks.</p>
+        <p className="text-sm text-db-text-secondary">No dead-letter tasks.</p>
       ) : (
-        <ul>
+        <ul className="space-y-2">
           {items.map((item) => (
-            <li key={item.id}>
-              <code>{item.taskId}</code> — {item.repo} @ {item.branch} · {item.error?.slice(0, 120)}
-              {item.resolvedAt ? ` · resolved: ${item.resolution}` : ""}
-              {!item.resolvedAt && (
-                <button type="button" onClick={() => retry(item.taskId)} disabled={loading} style={{ marginLeft: 8 }}>
+            <li key={item.id} className="flex flex-wrap items-center gap-2 rounded-md border border-db-border bg-db-surface p-3 text-sm text-db-text-secondary">
+              <code className="rounded bg-db-elevated px-1.5 py-0.5 text-xs text-db-text">{item.taskId}</code>
+              <span>
+                {item.repo} @ {item.branch}
+              </span>
+              <span className="text-db-text-tertiary">{item.error?.slice(0, 120)}</span>
+              {item.resolvedAt ? (
+                <Badge variant="success">resolved: {item.resolution}</Badge>
+              ) : (
+                <Button size="sm" variant="secondary" onClick={() => retry(item.taskId)} disabled={loading}>
                   Retry
-                </button>
+                </Button>
               )}
             </li>
           ))}

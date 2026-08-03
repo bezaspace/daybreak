@@ -1,83 +1,19 @@
 import { useEffect, useRef, useState } from "react";
+import { Play, Loader2 } from "lucide-react";
+import { Button } from "./components/base/Button.js";
+import { Input } from "./components/base/Input.js";
+import { Label } from "./components/base/Label.js";
+import { Select } from "./components/base/Select.js";
+import { Badge } from "./components/base/Badge.js";
+import { Card, CardContent, CardHeader, CardTitle } from "./components/base/Card.js";
+import { Sidebar, type ViewId } from "./components/Sidebar.js";
 import { CostDashboard } from "./CostDashboard.js";
 import { TraceView } from "./TraceView.js";
 import { TimeTravelView } from "./TimeTravelView.js";
 import { CiHealView } from "./CiHealView.js";
 import { DeadLetterView } from "./DeadLetterView.js";
 import { CleanupView } from "./CleanupView.js";
-
-interface StreamEvent {
-  id: string;
-  type: string;
-  timestamp: number;
-  taskId: string;
-  data: unknown;
-}
-
-export interface Task {
-  id: string;
-  repo: string;
-  branch: string;
-  prBranch?: string;
-  status: string;
-  prUrl?: string;
-  traceId?: string;
-  provider?: string;
-  costUsd?: number;
-  startedAt?: number;
-  endedAt?: number;
-  triggerSource?: string;
-  prNumber?: number;
-  sandboxId?: string;
-  keepAliveUntil?: number;
-  headCheckpointId?: string;
-  rootCheckpointId?: string;
-  parentTaskId?: string;
-  parentCheckpointId?: string;
-  headSha?: string;
-  checkRunId?: string;
-  healAttempt?: number;
-}
-
-interface Screenshot {
-  dataUrl: string;
-  url?: string;
-  timestamp: number;
-}
-
-interface Config {
-  maxTurns: number;
-  maxWallClockMinutes: number;
-  maxCostUsd: number;
-  compactionEnabled: boolean;
-  e2bTemplate?: string;
-  provider?: string;
-  maxConcurrentTasks: number;
-  queueWorkerEnabled: boolean;
-  branchTtlDays?: number;
-  sandboxIdleTtlMinutes?: number;
-  dataRetentionDays?: number;
-  cleanupEnabled?: boolean;
-}
-
-interface QueueStatus {
-  pending: number;
-  running: number;
-  maxConcurrent: number;
-  workerEnabled: boolean;
-  workerPollMs: number;
-  workerPending: number;
-  workerRunning: number;
-}
-
-interface TaskMetrics {
-  turns?: number;
-  toolCalls?: number;
-  blockedToolCalls?: number;
-  totalTokens?: number;
-  estimatedCostUsd?: number;
-  wallClockMs?: number;
-}
+import type { Config, QueueStatus, Screenshot, StreamEvent, Task, TaskMetrics } from "./lib/types.js";
 
 function formatEvent(event: StreamEvent): string {
   const time = new Date(event.timestamp).toLocaleTimeString();
@@ -203,8 +139,8 @@ function formatEvent(event: StreamEvent): string {
     return `[${time}] circuit_breaker: ${data.reason || ""} (limit ${data.limit ?? "-"}, current ${data.current ?? "-"})`;
   }
   if (event.type === "cost_alert") {
-    const data = event.data as { threshold?: number; limit?: number; current?: number };
-    return `[${time}] cost_alert: ${data.current ? `$${data.current.toFixed(4)}` : "-"} / $${data.limit ?? "-"} (threshold ${data.threshold ?? "-"})`;
+    const data = event.data as { current: number; limit: number; threshold: number };
+    return `[${time}] cost_alert: ${data.current ? `$${data.current.toFixed(4)}` : "-"} / $${data.limit} (threshold ${data.threshold})`;
   }
   if (event.type === "commit_pushed") {
     const data = event.data as { prBranch?: string };
@@ -228,6 +164,29 @@ function getInitialTaskId(): string | null {
   return params.get("taskId");
 }
 
+function getInitialView(): ViewId {
+  const params = new URLSearchParams(window.location.search);
+  const view = params.get("view");
+  const valid: ViewId[] = ["run", "tasks", "trace", "time-travel", "costs", "ci-heal", "dead-letter", "cleanup"];
+  return valid.includes(view as ViewId) ? (view as ViewId) : "run";
+}
+
+function updateUrl(view: ViewId, taskId: string | null) {
+  const params = new URLSearchParams();
+  if (view !== "run") params.set("view", view);
+  if (taskId) params.set("taskId", taskId);
+  const qs = params.toString();
+  window.history.replaceState({}, "", qs ? `?${qs}` : window.location.pathname);
+}
+
+function statusBadgeVariant(status: string): "default" | "success" | "warning" | "danger" | "info" | "secondary" {
+  if (status === "complete" || status === "promoted") return "success";
+  if (status === "running" || status === "starting") return "warning";
+  if (status === "failed") return "danger";
+  if (status === "pending") return "info";
+  return "secondary";
+}
+
 export function App() {
   const [repo, setRepo] = useState("https://github.com/bezaspace/daybreak-target");
   const [branch, setBranch] = useState("main");
@@ -244,7 +203,7 @@ export function App() {
   const [costAlert, setCostAlert] = useState<{ current: number; limit: number; threshold: number } | null>(null);
   const terminalRef = useRef<HTMLPreElement>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [view, setView] = useState<"run" | "trace" | "costs" | "time-travel" | "ci-heal" | "dead-letter" | "cleanup">("run");
+  const [view, setView] = useState<ViewId>(getInitialView());
   const [tenantId, setTenantId] = useState("");
   const [role, setRole] = useState("operator");
   const [userId, setUserId] = useState("");
@@ -313,11 +272,7 @@ export function App() {
             const mimeType = data.mimeType || "image/png";
             setScreenshots((prev) => [
               ...prev,
-              {
-                dataUrl: `data:${mimeType};base64,${data.screenshot}`,
-                url: data.url,
-                timestamp: event.timestamp,
-              },
+              { dataUrl: `data:${mimeType};base64,${data.screenshot}`, url: data.url, timestamp: event.timestamp },
             ]);
           }
         }
@@ -353,7 +308,7 @@ export function App() {
     };
 
     es.onerror = () => {
-      // EventSource will auto-reconnect; if terminal, close after a delay
+      // EventSource will auto-reconnect; terminal improvements are in Milestone 2
     };
 
     return () => {
@@ -366,6 +321,10 @@ export function App() {
       terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
     }
   }, [events]);
+
+  useEffect(() => {
+    updateUrl(view, taskId);
+  }, [view, taskId]);
 
   async function startTask(options?: { maxTurns?: number; maxCostUsd?: number; maxWallClockMinutes?: number }) {
     setStatus("starting");
@@ -381,7 +340,7 @@ export function App() {
     const data = await res.json();
     if (data.taskId) {
       setTaskId(data.taskId);
-      window.history.replaceState({}, "", `?taskId=${data.taskId}`);
+      setView("run");
     } else {
       setStatus("error: " + (data.error || "unknown"));
     }
@@ -396,7 +355,6 @@ export function App() {
   function startFailingSumDemo() {
     setRepo("https://github.com/bezaspace/daybreak-target");
     setBranch("main");
-    // Use a microtask so state updates before the fetch
     setTimeout(() => startTask(), 0);
   }
 
@@ -406,231 +364,253 @@ export function App() {
     setTimeout(() => startTask({ maxTurns: 3 }), 0);
   }
 
+  function navigate(next: ViewId) {
+    setView(next);
+    if (next === "run" && !taskId) {
+      // keep taskId null
+    }
+  }
+
+  const isRunning = status === "starting" || status === "running";
+
   return (
-    <main style={{ fontFamily: "system-ui, sans-serif", padding: "2rem", maxWidth: 960, margin: "0 auto" }}>
-      <h1>Daybreak</h1>
-
-      {config && (
-        <div style={{ color: "#666", fontSize: 14, marginBottom: "1rem" }}>
-          Circuit breakers: {config.maxTurns} turns · {config.maxWallClockMinutes} min · ${config.maxCostUsd} ·
-          compaction {config.compactionEnabled ? "on" : "off"}
-          {config.e2bTemplate ? ` · template ${config.e2bTemplate}` : ""} · max concurrency {config.maxConcurrentTasks}
-          · cleanup {config.cleanupEnabled ? "on" : "off"} ({config.branchTtlDays}d / {config.sandboxIdleTtlMinutes}m / {config.dataRetentionDays}d)
-        </div>
-      )}
-      {queueStatus && (
-        <div style={{ color: "#666", fontSize: 14, marginBottom: "1rem" }}>
-          Queue: {queueStatus.pending} pending · {queueStatus.running} running · limit {queueStatus.maxConcurrent} · worker{" "}
-          {queueStatus.workerEnabled ? "on" : "off"}
-        </div>
-      )}
-
-      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem" }}>
-        <button type="button" onClick={startFailingSumDemo} disabled={status === "starting" || status === "running"} style={{ padding: "0.5rem 1rem" }}>
-          Fix failing-sum test
-        </button>
-        <button type="button" onClick={startMaxTurnsDemo} disabled={status === "starting" || status === "running"} style={{ padding: "0.5rem 1rem" }}>
-          Demo MAX_TURNS=3 (should fail)
-        </button>
-      </div>
-
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          startTask();
-        }}
-        style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem" }}
-      >
-        <input
-          type="text"
-          value={repo}
-          onChange={(e) => setRepo(e.target.value)}
-          placeholder="Repo URL"
-          style={{ flex: 1, minWidth: 300, padding: "0.5rem" }}
-        />
-        <input
-          type="text"
-          value={branch}
-          onChange={(e) => setBranch(e.target.value)}
-          placeholder="Branch"
-          style={{ width: 120, padding: "0.5rem" }}
-        />
-        <button type="submit" disabled={status === "starting" || status === "running"} style={{ padding: "0.5rem 1rem" }}>
-          {status === "starting" ? "Starting..." : "Run task"}
-        </button>
-      </form>
-
-      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1rem" }}>
-        <input
-          type="text"
-          value={tenantId}
-          onChange={(e) => setTenantId(e.target.value)}
-          placeholder="Tenant ID (optional)"
-          style={{ flex: 1, minWidth: 200, padding: "0.5rem" }}
-        />
-        <select value={role} onChange={(e) => setRole(e.target.value)} style={{ padding: "0.5rem" }}>
-          <option value="operator">operator</option>
-          <option value="viewer">viewer</option>
-          <option value="admin">admin</option>
-        </select>
-        <input
-          type="text"
-          value={userId}
-          onChange={(e) => setUserId(e.target.value)}
-          placeholder="User ID (optional)"
-          style={{ width: 150, padding: "0.5rem" }}
-        />
-      </div>
-
-      {taskId && (
-        <p style={{ color: "#666" }}>
-          Task: <code>{taskId}</code> · Status: <strong>{status}</strong>
-          {prBranch && ` · branch: ${prBranch}`}
-          {prUrl && (
-            <span>
-              {" · "}
-              <a href={prUrl} target="_blank" rel="noopener noreferrer">
-                View PR
-              </a>
-            </span>
-          )}
-        </p>
-      )}
-
-      {metrics && (
-        <div style={{ background: "#f6f6f6", padding: "1rem", borderRadius: 8, marginBottom: "1rem" }}>
-          <strong>Metrics</strong>: turns {metrics.turns ?? "-"} · tool calls {metrics.toolCalls ?? "-"}
-          {metrics.blockedToolCalls ? ` · blocked ${metrics.blockedToolCalls}` : ""} · tokens {metrics.totalTokens ?? "-"} · cost{" "}
-          {typeof metrics.estimatedCostUsd === "number" ? `$${metrics.estimatedCostUsd.toFixed(4)}` : "-"} · wall-clock {formatDuration(metrics.wallClockMs)}
-          {activeProvider ? ` · provider: ${activeProvider}` : ""}
-          {config?.provider && activeProvider && config.provider !== activeProvider ? " (fallback)" : ""}
-        </div>
-      )}
-
-      {costAlert && (
-        <div style={{ background: "#fff3cd", color: "#856404", padding: "1rem", borderRadius: 8, marginBottom: "1rem" }}>
-          <strong>Cost alert</strong>: ${costAlert.current.toFixed(4)} / ${costAlert.limit} (threshold {costAlert.threshold})
-        </div>
-      )}
-
-      {taskId && (
-        <div style={{ marginBottom: "1rem" }}>
-          <button type="button" disabled={view === "run"} onClick={() => setView("run")} style={{ marginRight: 8 }}>
-            Run
-          </button>
-          <button type="button" disabled={view === "trace"} onClick={() => setView("trace")} style={{ marginRight: 8 }}>
-            Trace
-          </button>
-          <button type="button" disabled={view === "time-travel"} onClick={() => setView("time-travel")} style={{ marginRight: 8 }}>
-            Time Travel
-          </button>
-          <button type="button" disabled={view === "costs"} onClick={() => setView("costs")}>
-            Costs
-          </button>
-          <button type="button" disabled={view === "ci-heal"} onClick={() => setView("ci-heal")}>
-            CI Heal
-          </button>
-          <button type="button" disabled={view === "dead-letter"} onClick={() => setView("dead-letter")}>
-            Dead Letter
-          </button>
-          <button type="button" disabled={view === "cleanup"} onClick={() => setView("cleanup")}>
-            Cleanup
-          </button>
-        </div>
-      )}
-
-      {view === "trace" && taskId && selectedTask?.traceId && (
-        <TraceView
-          taskId={taskId}
-          traceId={selectedTask.traceId}
-          provider={selectedTask.provider}
-          costUsd={selectedTask.costUsd}
-        />
-      )}
-      {view === "trace" && taskId && !selectedTask?.traceId && <p>No trace available for this task.</p>}
-
-      {view === "time-travel" && taskId && <TimeTravelView taskId={taskId} />}
-
-      {view === "costs" && <CostDashboard />}
-
-      {view === "ci-heal" && <CiHealView tasks={tasks} />}
-
-      {view === "dead-letter" && <DeadLetterView />}
-
-      {view === "cleanup" && <CleanupView />}
-
-      {view !== "run" ? null : screenshots.length > 0 && (
-        <div style={{ marginBottom: "1rem" }}>
-          {screenshots.map((s, i) => (
-            <div key={i} style={{ marginBottom: "1rem" }}>
-              <img
-                src={s.dataUrl}
-                alt={`Screenshot ${i + 1}${s.url ? ` of ${s.url}` : ""}`}
-                style={{ maxWidth: "100%", border: "1px solid #ccc", borderRadius: 8 }}
-              />
-              <div style={{ color: "#666", fontSize: 12 }}>{s.url || "Browser screenshot"}</div>
+    <div className="flex h-full bg-db-page">
+      <Sidebar active={view} onNavigate={navigate} taskId={taskId} />
+      <main className="flex-1 overflow-y-auto pl-60">
+        <div className="mx-auto max-w-6xl p-6">
+          {config && (
+            <div className="mb-4 text-xs text-db-text-secondary">
+              Circuit breakers: {config.maxTurns} turns · {config.maxWallClockMinutes} min · ${config.maxCostUsd} ·
+              compaction {config.compactionEnabled ? "on" : "off"}
+              {config.e2bTemplate ? ` · template ${config.e2bTemplate}` : ""} · max concurrency {config.maxConcurrentTasks}
+              · cleanup {config.cleanupEnabled ? "on" : "off"} ({config.branchTtlDays}d / {config.sandboxIdleTtlMinutes}m / {config.dataRetentionDays}d)
             </div>
-          ))}
+          )}
+          {queueStatus && (
+            <div className="mb-4 text-xs text-db-text-secondary">
+              Queue: {queueStatus.pending} pending · {queueStatus.running} running · limit {queueStatus.maxConcurrent} · worker{" "}
+              {queueStatus.workerEnabled ? "on" : "off"}
+            </div>
+          )}
+
+          {view === "run" && (
+            <>
+              <div className="mb-4 flex flex-wrap gap-2">
+                <Button onClick={startFailingSumDemo} disabled={isRunning} variant="secondary">
+                  <Play className="h-4 w-4" />
+                  Fix failing-sum test
+                </Button>
+                <Button onClick={startMaxTurnsDemo} disabled={isRunning} variant="outline">
+                  Demo MAX_TURNS=3 (should fail)
+                </Button>
+              </div>
+
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  startTask();
+                }}
+                className="mb-4 flex flex-wrap items-end gap-2"
+              >
+                <div className="flex min-w-[16rem] flex-1 flex-col gap-1.5">
+                  <Label htmlFor="repo">Repo URL</Label>
+                  <Input id="repo" type="text" value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="Repo URL" />
+                </div>
+                <div className="flex w-32 flex-col gap-1.5">
+                  <Label htmlFor="branch">Branch</Label>
+                  <Input id="branch" type="text" value={branch} onChange={(e) => setBranch(e.target.value)} placeholder="Branch" />
+                </div>
+                <Button type="submit" disabled={isRunning}>
+                  {isRunning ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Starting…
+                    </>
+                  ) : (
+                    "Run task"
+                  )}
+                </Button>
+              </form>
+
+              <div className="mb-4 flex flex-wrap items-end gap-2">
+                <div className="flex min-w-[12rem] flex-1 flex-col gap-1.5">
+                  <Label htmlFor="tenantId">Tenant ID (optional)</Label>
+                  <Input
+                    id="tenantId"
+                    type="text"
+                    value={tenantId}
+                    onChange={(e) => setTenantId(e.target.value)}
+                    placeholder="Tenant ID (optional)"
+                  />
+                </div>
+                <div className="flex w-40 flex-col gap-1.5">
+                  <Label>Role</Label>
+                  <Select
+                    value={role}
+                    onValueChange={(value) => setRole(value ?? "operator")}
+                    options={[
+                      { value: "operator", label: "operator" },
+                      { value: "viewer", label: "viewer" },
+                      { value: "admin", label: "admin" },
+                    ]}
+                  />
+                </div>
+                <div className="flex min-w-[10rem] flex-1 flex-col gap-1.5">
+                  <Label htmlFor="userId">User ID (optional)</Label>
+                  <Input id="userId" type="text" value={userId} onChange={(e) => setUserId(e.target.value)} placeholder="User ID (optional)" />
+                </div>
+              </div>
+
+              {taskId && (
+                <div className="mb-4 flex items-center gap-2 text-sm text-db-text-secondary">
+                  <span>Task:</span>
+                  <code className="rounded bg-db-elevated px-1.5 py-0.5 text-xs text-db-text">{taskId}</code>
+                  <span>· Status:</span>
+                  <Badge variant={statusBadgeVariant(status)}>{status}</Badge>
+                  {prBranch && <span>· branch: {prBranch}</span>}
+                  {prUrl && (
+                    <span>
+                      ·{" "}
+                      <a href={prUrl} target="_blank" rel="noopener noreferrer" className="text-db-accent hover:text-db-accent-hover underline">
+                        View PR
+                      </a>
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {metrics && (
+                <Card className="mb-4">
+                  <CardHeader>
+                    <CardTitle>Metrics</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    turns {metrics.turns ?? "-"} · tool calls {metrics.toolCalls ?? "-"}
+                    {metrics.blockedToolCalls ? ` · blocked ${metrics.blockedToolCalls}` : ""} · tokens {metrics.totalTokens ?? "-"} · cost{" "}
+                    {typeof metrics.estimatedCostUsd === "number" ? `$${metrics.estimatedCostUsd.toFixed(4)}` : "-"} · wall-clock{" "}
+                    {formatDuration(metrics.wallClockMs)}
+                    {activeProvider ? ` · provider: ${activeProvider}` : ""}
+                    {config?.provider && activeProvider && config.provider !== activeProvider ? " (fallback)" : ""}
+                  </CardContent>
+                </Card>
+              )}
+
+              {costAlert && (
+                <Card className="mb-4 border-db-warning/30 bg-db-warning/5">
+                  <CardContent>
+                    <span className="font-semibold text-db-warning">Cost alert</span>: ${costAlert.current.toFixed(4)} / ${costAlert.limit} (threshold{" "}
+                    {costAlert.threshold})
+                  </CardContent>
+                </Card>
+              )}
+
+              {screenshots.length > 0 && (
+                <div className="mb-4 space-y-4">
+                  {screenshots.map((s, i) => (
+                    <div key={i}>
+                      <img
+                        src={s.dataUrl}
+                        alt={`Screenshot ${i + 1}${s.url ? ` of ${s.url}` : ""}`}
+                        className="max-w-full rounded border border-db-border"
+                      />
+                      <div className="mt-1 text-xs text-db-text-secondary">{s.url || "Browser screenshot"}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <pre
+                ref={terminalRef}
+                className="mb-6 h-[28rem] overflow-auto whitespace-pre-wrap rounded-lg border border-db-border bg-black p-4 font-mono text-sm leading-relaxed text-green-400 scrollbar-thin"
+              >
+                {events.map((ev) => formatEvent(ev)).join("\n")}
+              </pre>
+
+              <h2 className="mb-3 text-lg font-semibold text-db-text">Recent tasks</h2>
+              <ul className="space-y-2">
+                {tasks.map((t) => (
+                  <li
+                    key={t.id}
+                    className="rounded-md border border-db-border bg-db-surface p-3 text-sm text-db-text-secondary transition-colors hover:bg-db-subtle"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <code className="rounded bg-db-elevated px-1.5 py-0.5 text-xs text-db-text">{t.id}</code>
+                      <span>
+                        {t.repo} @ {t.branch}
+                      </span>
+                      <Badge variant={statusBadgeVariant(t.status)}>{t.status}</Badge>
+                      {t.triggerSource ? <span>· {t.triggerSource}</span> : null}
+                      {t.triggerSource === "check_run"
+                        ? ` · heal of ${t.prBranch || "-"}${typeof t.prNumber === "number" ? ` #${t.prNumber}` : ""}${t.headSha ? ` · ${t.headSha.slice(0, 7)}` : ""}`
+                        : t.parentTaskId
+                          ? ` · branch of ${t.parentTaskId.slice(0, 8)}`
+                          : t.prBranch
+                            ? ` · ${t.prBranch}`
+                            : ""}
+                      {t.healAttempt ? ` · attempt ${t.healAttempt}` : ""}
+                      {t.provider ? ` · ${t.provider}` : ""}
+                      {typeof t.costUsd === "number" ? ` · $${t.costUsd.toFixed(4)}` : ""}
+                      {t.prUrl && (
+                        <span>
+                          ·{" "}
+                          <a href={t.prUrl} target="_blank" rel="noopener noreferrer" className="text-db-accent hover:text-db-accent-hover underline">
+                            PR
+                          </a>
+                        </span>
+                      )}
+                      {t.status === "pending" && (
+                        <Button size="sm" variant="ghost" onClick={() => cancelTask(t.id)}>
+                          Cancel
+                        </Button>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+
+          {view === "tasks" && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Tasks</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-db-text-secondary">Full task list with search, filters, and detail view is planned in Milestone 1.</p>
+                <p className="mt-2 text-db-text-tertiary">Use the Recent tasks list on the Run page as a temporary workaround.</p>
+              </CardContent>
+            </Card>
+          )}
+
+          {view === "trace" && taskId && selectedTask?.traceId && (
+            <TraceView
+              taskId={taskId}
+              traceId={selectedTask.traceId}
+              provider={selectedTask.provider}
+              costUsd={selectedTask.costUsd}
+            />
+          )}
+          {view === "trace" && taskId && !selectedTask?.traceId && (
+            <Card><CardContent>No trace available for this task.</CardContent></Card>
+          )}
+          {view === "trace" && !taskId && (
+            <Card><CardContent>Select a task on the Run page to view its trace.</CardContent></Card>
+          )}
+
+          {view === "time-travel" && taskId && <TimeTravelView taskId={taskId} />}
+          {view === "time-travel" && !taskId && (
+            <Card><CardContent>Select a task on the Run page to explore checkpoints.</CardContent></Card>
+          )}
+
+          {view === "costs" && <CostDashboard />}
+
+          {view === "ci-heal" && <CiHealView tasks={tasks} />}
+
+          {view === "dead-letter" && <DeadLetterView />}
+
+          {view === "cleanup" && <CleanupView />}
         </div>
-      )}
-
-      {view === "run" && (
-        <pre
-          ref={terminalRef}
-          style={{
-            background: "#111",
-            color: "#0f0",
-            padding: "1rem",
-            borderRadius: 8,
-            height: 480,
-            overflow: "auto",
-            whiteSpace: "pre-wrap",
-            fontFamily: "monospace",
-            fontSize: 14,
-          }}
-        >
-          {events.map((ev) => formatEvent(ev)).join("\n")}
-        </pre>
-      )}
-
-      <h2>Recent tasks</h2>
-      <ul>
-        {tasks.map((t) => (
-          <li
-            key={t.id}
-            style={{
-              opacity: t.status === "abandoned" ? 0.5 : 1,
-              color: t.status === "promoted" ? "#2e7d32" : undefined,
-            }}
-          >
-            <code>{t.id}</code> — {t.repo} @ {t.branch} · {t.status}
-            {t.triggerSource ? ` · ${t.triggerSource}` : ""}
-            {t.triggerSource === "check_run"
-              ? ` · heal of ${t.prBranch || "-"}${typeof t.prNumber === "number" ? ` #${t.prNumber}` : ""}${t.headSha ? ` · ${t.headSha.slice(0, 7)}` : ""}`
-              : t.parentTaskId
-                ? ` · branch of ${t.parentTaskId.slice(0, 8)}`
-                : t.prBranch
-                  ? ` · ${t.prBranch}`
-                  : ""}
-            {t.healAttempt ? ` · attempt ${t.healAttempt}` : ""}
-            {t.provider ? ` · ${t.provider}` : ""}
-            {typeof t.costUsd === "number" ? ` · $${t.costUsd.toFixed(4)}` : ""}
-            {t.prUrl && (
-              <span>
-                {" · "}
-                <a href={t.prUrl} target="_blank" rel="noopener noreferrer">
-                  PR
-                </a>
-              </span>
-            )}
-            {t.status === "pending" && (
-              <button type="button" onClick={() => cancelTask(t.id)} style={{ marginLeft: 8, padding: "0 0.5rem" }}>
-                Cancel
-              </button>
-            )}
-          </li>
-        ))}
-      </ul>
-    </main>
+      </main>
+    </div>
   );
 }
