@@ -10,6 +10,8 @@
   "scripts": {
     "spike": "pnpm --filter agent-runner spike",
     "eval": "pnpm --filter evals eval",
+    "eval:e2e": "pnpm --filter evals eval:e2e",
+    "eval:ci-self-heal": "pnpm --filter evals eval:ci-self-heal",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",

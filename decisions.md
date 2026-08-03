@@ -2,7 +2,7 @@
 
 **A living log of the architectural, product, and sequencing decisions behind the Daybreak roadmap.**
 
-> **Status:** Updated through Phase 1 exit-criteria demo.  
+> **Status:** Updated through Phase 5.  
 > **Started:** 2026-08-01
 
 ---
@@ -457,6 +457,21 @@
 - `CiLogParser` cleans the log and extracts failure blocks using markers such as `FAIL`, `Error:`, `npm ERR!`, `Tests: ... failed`, and `AssertionError`, keeping `DAYBREAK_CI_LOG_CONTEXT_LINES` (default 20) on each side.
 - `redactSecrets` removes `token=...`, `api_key=...`, `SECRET=...`, bearer tokens, URL credentials, and query-string credentials without mangling surrounding text.
 - This module is consumed by the heal-task builder in M3 and is unit-tested against a 100 KB mocked log fixture.
+
+---
+
+## D39. Phase 5 CI self-healing final design
+
+**Decision:** Implement CI self-healing as a `check_run` webhook handler (not `check_suite`) in the control plane. The handler reuses the existing `REVIEW_MODE` branch-iteration path in `packages/agent-runner/src/run-task.ts` by passing `HEAL_MODE=true`, so the agent pushes a follow-up commit to the existing PR branch rather than opening a new PR. Failed-job context is built from `check-runs/{id}/annotations` first, then `actions/jobs/{job_id}/logs` (because `check_run.id` is the Actions job id), truncated from the end, cleaned, and redacted before being injected into the prompt. Only Daybreak PRs (`daybreak/` prefix or a matching `pr_branch` in `tasks`) are healed; `main`/`master`/`protectedBranches` are refused. Duplicate `check_run.id` values are deduplicated via a 24-hour Redis key, and a per-PR max-attempt counter plus a same-commit cooldown guard prevent infinite self-heal loops.
+
+**Rationale:** `check_run` is the granular unit GitHub uses for Actions status, and it carries the `check_run.id` that maps directly to the `actions/jobs/{job_id}/logs` endpoint. Annotations provide path/line-level failure metadata, while raw logs contain the actual stack trace and error output. Reusing the review/commit path keeps the implementation small and consistent with Phase 3/4 branch iteration. Branch-prefix and known-task guards prevent the agent from healing arbitrary or protected branches. The 24-hour dedupe and max-attempt circuit breakers are the minimum viable safety net for an autonomous fix-and-push loop.
+
+**Consequences:**
+- `packages/control-plane/src/server.ts` has a `check_run` webhook case, `CiLogFetcher`/`CiLogParser` helpers, `runHeal`, and a guard chain (duplicate `checkRunId`, in-flight task, 24-hour attempt budget, same-commit cooldown, branch safety).
+- `packages/agent-runner/src/run-task.ts` and `sandbox.ts` treat `HEAL_MODE=true` like `REVIEW_MODE` for branch iteration and emit `heal_task_start`/`heal_complete`/`heal_failed`/`heal_skipped` events.
+- `packages/control-plane/src/server.test.ts` covers the webhook handler, log parser, and circuit breakers.
+- `packages/evals/src/ci-self-heal.ts` provides a real end-to-end harness (create a broken PR, wait for CI failure, send webhook, wait for heal) and a fast local integration mode that runs the control-plane `check_run` tests.
+- `docs/COST_BUDGET.md` and `docs/SECRETS.md` are updated to reflect the extra per-heal sandbox/LLM cost and the `actions:read`/`checks:read` PAT requirements.
 
 ---
 

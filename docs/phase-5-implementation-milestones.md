@@ -159,28 +159,23 @@ This document breaks the Phase 5 exit criteria into small, independently-demoabl
 
 **What it ships:** Phase 5 is repeatable, budgeted, tested, and marked complete.
 
-- [ ] Add end-to-end test harness for CI self-healing:
-  - Extend `packages/evals/src/e2e.ts` (or add `packages/evals/src/ci-self-heal.ts`) to:
-    - Open a PR with a deliberately broken test on `bezaspace/daybreak-target`.
-    - Wait for GitHub Actions to fail.
-    - Send the `check_run` webhook payload to the local control plane (or wait for GitHub to deliver it via a tunnel).
-    - Poll for the heal task to complete.
-    - Assert a new commit was pushed and the next CI run passes.
-  - Because real GitHub CI latency is variable, also include a fast control-plane integration test that mocks the `check_run` payload and asserts the heal task is created with the right `prBranch` and `headSha`.
-- [ ] Add unit tests for `ci-logs.ts` (parser, redactor, annotation fetcher).
-- [ ] Update `docs/COST_BUDGET.md` with Phase 5 cost drivers:
+- [x] Add end-to-end test harness for CI self-healing:
+  - Added `packages/evals/src/ci-self-heal.ts`. In `--real` mode it can open a broken PR on `bezaspace/daybreak-target`, wait for a failed GitHub Actions `check_run`, send the webhook to the local control plane, and poll for the heal task, new commit, and green CI run.
+  - The default fast mode runs the control-plane `check_run` integration tests, which mock the payload and assert the heal task is created with the right `prBranch` and `headSha`.
+- [x] Add unit tests for `ci-logs.ts` (parser, redactor, annotation fetcher). Covered in `packages/control-plane/src/ci-logs.test.ts`.
+- [x] Update `docs/COST_BUDGET.md` with Phase 5 cost drivers:
   - One extra E2B sandbox (or reconnect) per heal.
   - Extra LLM turns per heal (typically 3–8 turns).
   - GitHub API log download is free under REST quota.
   - `DAYBREAK_MAX_HEAL_ATTEMPTS_PER_PR` caps cost per PR.
-- [ ] Update `.env.example` with all Phase 5 variables.
-- [ ] Update `docs/SECRETS.md` to note that the PAT needs `actions:read` and `checks:read` (usually covered by `repo` scope) for fetching logs/annotations.
-- [ ] Update `roadmap.md` Phase 5 checklist to mark items complete.
-- [ ] Update `decisions.md` with final design choices (check_run vs check_suite, log parsing strategy, branch-prefix trust, max-attempt circuit breaker).
-- [ ] Run `pnpm lint && pnpm typecheck && pnpm test && pnpm --filter agent-runner build:bundle && pnpm --filter ui build`.
+- [x] Update `.env.example` with all Phase 5 variables.
+- [x] Update `docs/SECRETS.md` to note that the PAT needs `actions:read` and `checks:read` (usually covered by `repo` scope) for fetching logs/annotations.
+- [x] Update `roadmap.md` Phase 5 checklist to mark items complete.
+- [x] Update `decisions.md` with final design choices (check_run vs check_suite, log parsing strategy, branch-prefix trust, max-attempt circuit breaker).
+- [x] Run `pnpm lint && pnpm typecheck && pnpm test && pnpm --filter agent-runner build:bundle && pnpm --filter ui build`.
 
 **Acceptance:**
-- `pnpm eval` includes a CI self-heal test path.
+- `pnpm eval` supports a `--ci-self-heal` path; `pnpm eval:ci-self-heal` runs the fast integration by default.
 - A manual end-to-end demo succeeds: broken PR → CI fails → `check_run` webhook → heal commit pushed → CI green.
 - All CI checks pass and `roadmap.md` shows Phase 5 as complete.
 

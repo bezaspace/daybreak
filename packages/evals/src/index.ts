@@ -5,6 +5,7 @@ import pc from "picocolors";
 import { readdir, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { runCiSelfHeal } from "./ci-self-heal.js";
 
 interface TraceInfo {
   id: string;
@@ -53,6 +54,12 @@ async function loadFixtures(): Promise<EvalCase[]> {
 async function main() {
   const envPath = resolve(__dirname, "../../.env");
   const config = loadConfig(envPath);
+
+  if (process.argv.includes("--ci-self-heal")) {
+    await runCiSelfHeal();
+    return;
+  }
+
   const fixtures = await loadFixtures();
 
   if (fixtures.length === 0) {

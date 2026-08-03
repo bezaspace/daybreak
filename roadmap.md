@@ -2,7 +2,7 @@
 
 **Open-source, cloud-native, autonomous AI software engineer platform with time-travel state branching and full OpenTelemetry lineage.**
 
-> **Status:** Phase 4 complete — per-turn git checkpoints, Pi session JSONL snapshots, same-sandbox rewind, cross-sandbox fork with `git-reinstall`/`snapshot` strategies, time-travel dashboard UI, and branch promote/abandon converged.  
+> **Status:** Phase 5 complete — CI self-healing with `check_run` webhook ingress, failed-job log/annotation fetcher, heal task router, commit-pushing path, circuit breakers, deduplication, dashboard/event-stream UI, eval harness, and updated cost budget.  
 > **Started:** 2026-08-01 (planning)  
 > **Document version:** 2.1
 
@@ -42,7 +42,7 @@ Progress is measured by the completion of demoable vertical slices and objective
 | [x] 2 | Observability, Cost Control & Provider Resilience | OTel/Langfuse trace tree, cost dashboard, provider fallback, eval harness, updated cost budget |
 | [ ] 3 | GitHub-Native Triggers & Review Loop | GitHub App, issue/PR-comment triggers, scoped 1h tokens, review-loop listener |
 | [ ] 4 | Time-Travel State Branching | Per-turn checkpoints, filesystem + Pi-state rewind, parallel attempt forking |
-| [ ] 5 | CI Self-Healing | `check_run` webhook → wake sandbox → fix commit |
+| [x] 5 | CI Self-Healing | `check_run` webhook → wake sandbox → fix commit |
 | [ ] 6 | Resilience, Scale & Polish | Task queue, multi-tenancy, idempotency, retry, security audit, branch cleanup |
 | [ ] 7 | Cloudflare Deployment & v1.0 | Workers/Pages, Durable Objects/Queues, production webhooks, release docs |
 
@@ -168,15 +168,15 @@ Progress is measured by the completion of demoable vertical slices and objective
 
 **Goal:** Listen for failed GitHub Actions status checks on Daybreak's own PRs, intercept error logs, and push self-healing fix commits automatically.
 
-- [ ] 8.1. **Webhook listener:** For `check_run` events with `conclusion: failure`.
-- [ ] 8.2. **Log fetcher:** Uses GitHub API to pull the failed CI step logs.
-- [ ] 8.3. **Heal task router:** Creates a new task in an existing (or forked) sandbox, injecting the CI failure logs as context for the Pi agent.
-- [ ] 8.4. **Commit path:** Agent applies fix and pushes a new commit to the existing PR branch. CI re-runs automatically.
-- [ ] 8.5. Filter `check_run` webhooks to only those on Daybreak PRs.
-- [ ] 8.6. Implement log parsing to extract the relevant error block (avoid sending 10MB of raw logs to the LLM).
-- [ ] 8.7. Feed the error to Pi with a targeted prompt: "CI failed with: [error]. Fix it."
-- [ ] 8.8. Add circuit breaker: max 2 self-heal attempts per PR to prevent infinite CI loops; still subject to `MAX_TURNS` and `MAX_COST`.
-- [ ] 8.9. **Exit criteria:** Merge a PR with a deliberately broken test. CI fails. Daybreak receives the webhook, analyzes the log, pushes a fix, and CI goes green.
+- [x] 8.1. **Webhook listener:** For `check_run` events with `conclusion: failure`.
+- [x] 8.2. **Log fetcher:** Uses GitHub API to pull the failed CI step logs.
+- [x] 8.3. **Heal task router:** Creates a new task in an existing (or forked) sandbox, injecting the CI failure logs as context for the Pi agent.
+- [x] 8.4. **Commit path:** Agent applies fix and pushes a new commit to the existing PR branch. CI re-runs automatically.
+- [x] 8.5. Filter `check_run` webhooks to only those on Daybreak PRs.
+- [x] 8.6. Implement log parsing to extract the relevant error block (avoid sending 10MB of raw logs to the LLM).
+- [x] 8.7. Feed the error to Pi with a targeted prompt: "CI failed with: [error]. Fix it."
+- [x] 8.8. Add circuit breaker: max 2 self-heal attempts per PR to prevent infinite CI loops; still subject to `MAX_TURNS` and `MAX_COST`.
+- [x] 8.9. **Exit criteria:** Merge a PR with a deliberately broken test. CI fails. Daybreak receives the webhook, analyzes the log, pushes a fix, and CI goes green.
 
 ---
 

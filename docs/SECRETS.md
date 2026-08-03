@@ -24,7 +24,7 @@ Daybreak needs several credentials across its lifecycle. This document explains 
 - The agent should never read this from inside a sandbox. The control plane injects a short-lived sandbox API key only when spawning a workspace.
 
 ### GitHub
-- `GITHUB_TOKEN` — a Personal Access Token (PAT) for Phase 3. It must have `contents:write` and `pull_requests:write` on every repo Daybreak touches. `checks:read` and `issues:read` are useful for context. For fine-grained PATs, grant `Contents` and `Pull requests` read/write on the selected repos.
+- `GITHUB_TOKEN` — a Personal Access Token (PAT) for Phase 3 and Phase 5. It must have `contents:write` and `pull_requests:write` on every repo Daybreak touches. Phase 5 additionally requires `actions:read` and `checks:read` to fetch failed CI job logs and annotations (these are usually included in the `repo` scope of a classic PAT). For fine-grained PATs, grant `Contents`, `Pull requests`, `Actions`, and `Checks` read/write on the selected repos.
 - `GITHUB_WEBHOOK_SECRET` — used to verify `X-Hub-Signature-256` on repo webhook deliveries. Store it as a Cloudflare/Worker secret for Phase 7; locally it lives in `.env`.
 - `GITHUB_WEBHOOK_REPO_ALLOWLIST` — comma-separated `owner/repo` or `owner/*` patterns limiting which repos may trigger the control plane.
 - `GITHUB_WEBHOOK_RATE_LIMIT` — maximum webhook-triggered tasks per repo or per sender in the last hour (default `10`).

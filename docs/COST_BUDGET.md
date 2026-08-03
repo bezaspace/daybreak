@@ -139,3 +139,28 @@ These are intentionally tight. Raise them only after measuring real usage in you
 | Fork branch runtime | new sandbox, own budget | ~$0.0003–0.001 per branch | `DAYBREAK_FORK_STRATEGY` |
 | Snapshot storage | only with `snapshot` strategy | ~$0.0000045/GiB/s | `DAYBREAK_FORK_STRATEGY=snapshot` |
 | Maximum checkpoints | 100 per task | storage cap | `DAYBREAK_MAX_CHECKPOINTS_PER_TASK` |
+
+## Phase 5 CI self-healing budget impact
+
+### Per-heal costs
+
+- **Extra E2B sandbox (or reconnect):** Each failed `check_run` may start a new sandbox or reconnect to a kept-alive sandbox from the original PR task. A reconnect avoids a cold start; a new sandbox pays the usual cold-start + dependency-install cost (see Phase 4 fork table).
+- **Extra LLM turns per heal:** The agent receives the CI error context and reruns tests, typically 3–8 additional turns per heal. Each turn consumes primary/fallback provider tokens and is billed at the active model's rate.
+- **GitHub API log download:** `GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs` and `GET /repos/{owner}/{repo}/check-runs/{id}/annotations` are free under GitHub REST API quota for `repo`/`actions:read` tokens. No egress cost from GitHub.
+- **Webhook deduplication Redis key:** One `daybreak:heal-checkrun:{checkRunId}` key per failed check run, 24-hour TTL. Negligible memory and command volume.
+
+### Circuit breakers
+
+- `DAYBREAK_MAX_HEAL_ATTEMPTS_PER_PR` (default `2`) caps the number of heal tasks spawned for a single PR.
+- `DAYBREAK_HEAL_COOLDOWN_SECONDS` (default `60`) prevents rapid re-triggering on the same commit.
+- Standard `MAX_TURNS` and `MAX_COST_USD` still apply inside each heal task.
+
+### Summary table
+
+| Phase 5 cost driver | Default behavior | Approx. cost | Controlling env |
+|---------------------|------------------|--------------|-----------------|
+| Heal sandbox spawn | reconnect if kept-alive, else new sandbox | reconnect ~$0; new ~$0.0003–0.001 | `REVIEW_KEEP_ALIVE_MS` |
+| LLM turns per heal | 3–8 extra turns | ~$0.003–0.009 at gpt-4o-mini rates | `MAX_COST_USD`, `MAX_TURNS` |
+| GitHub log/annotation fetch | REST API, free under quota | ~$0 | `DAYBREAK_MAX_CI_LOG_BYTES` |
+| Per-check-run dedupe key | Redis key with 24h TTL | ~$0 | n/a |
+| Heal attempt cap | 2 per PR per 24h | prevents runaway cost | `DAYBREAK_MAX_HEAL_ATTEMPTS_PER_PR` |
