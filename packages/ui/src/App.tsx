@@ -181,9 +181,17 @@ function formatEvent(event: StreamEvent): string {
     const data = event.data as { childTaskId?: string };
     return `[${time}] branch_abandoned: child=${data.childTaskId?.slice(0, 8) ?? "-"}`;
   }
-  if (event.type === "budget_exceeded" || event.type === "rate_limited") {
+  if (event.type === "budget_exceeded" || event.type === "rate_limited" || event.type === "budget_deferred") {
     const data = event.data as { reason?: string };
     return `[${time}] ${event.type}: ${data.reason || ""}`;
+  }
+  if (event.type === "circuit_breaker_triggered") {
+    const data = event.data as { reason?: string; limit?: number; current?: number };
+    return `[${time}] circuit_breaker: ${data.reason || ""} (limit ${data.limit ?? "-"}, current ${data.current ?? "-"})`;
+  }
+  if (event.type === "cost_alert") {
+    const data = event.data as { threshold?: number; limit?: number; current?: number };
+    return `[${time}] cost_alert: ${data.current ? `$${data.current.toFixed(4)}` : "-"} / $${data.limit ?? "-"} (threshold ${data.threshold ?? "-"})`;
   }
   if (event.type === "commit_pushed") {
     const data = event.data as { prBranch?: string };
@@ -220,6 +228,7 @@ export function App() {
   const [activeProvider, setActiveProvider] = useState<string | null>(null);
   const [config, setConfig] = useState<Config | null>(null);
   const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
+  const [costAlert, setCostAlert] = useState<{ current: number; limit: number; threshold: number } | null>(null);
   const terminalRef = useRef<HTMLPreElement>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [view, setView] = useState<"run" | "trace" | "costs" | "time-travel" | "ci-heal" | "dead-letter">("run");
@@ -277,6 +286,7 @@ export function App() {
     setPrBranch(null);
     setScreenshots([]);
     setMetrics(null);
+    setCostAlert(null);
 
     const es = new EventSource(`/api/tasks/${taskId}/stream`);
     es.onmessage = (message) => {
@@ -319,6 +329,10 @@ export function App() {
           const data = event.data as { metrics?: TaskMetrics; error?: string; provider?: string };
           if (data.metrics) setMetrics(data.metrics);
           if (data.provider) setActiveProvider(data.provider);
+        }
+        if (event.type === "cost_alert") {
+          const data = event.data as { current: number; limit: number; threshold: number };
+          setCostAlert(data);
         }
       } catch {
         // ignore heartbeat or malformed
@@ -476,6 +490,12 @@ export function App() {
           {typeof metrics.estimatedCostUsd === "number" ? `$${metrics.estimatedCostUsd.toFixed(4)}` : "-"} · wall-clock {formatDuration(metrics.wallClockMs)}
           {activeProvider ? ` · provider: ${activeProvider}` : ""}
           {config?.provider && activeProvider && config.provider !== activeProvider ? " (fallback)" : ""}
+        </div>
+      )}
+
+      {costAlert && (
+        <div style={{ background: "#fff3cd", color: "#856404", padding: "1rem", borderRadius: 8, marginBottom: "1rem" }}>
+          <strong>Cost alert</strong>: ${costAlert.current.toFixed(4)} / ${costAlert.limit} (threshold {costAlert.threshold})
         </div>
       )}
 

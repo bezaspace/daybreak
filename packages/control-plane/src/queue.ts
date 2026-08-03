@@ -4,7 +4,8 @@ import { claimNextPendingTask, getSupabase, getTask, persistTask, updateTask } f
 import { IdempotencyStore, getExistingTask } from "./idempotency.js";
 import { RetryClassifier, RetryScheduler } from "./retry.js";
 import { insertDeadLetterTask } from "./db.js";
-import { TenantService } from "./tenants.js";
+import { TenantService, type Tenant } from "./tenants.js";
+import { BudgetService } from "./budgets.js";
 
 export interface TaskSpec {
   repo: string;
@@ -185,7 +186,23 @@ export class TaskQueue {
       while (this.running.size < this.maxConcurrent) {
         const task = await this.claimNext();
         if (!task) break;
+
+        const tenant = task.tenantId ? await TenantService.getTenantById(task.tenantId) : undefined;
+        const budget = await BudgetService.isWithinBudget(tenant);
+        if (!budget.ok) {
+          task.status = "retry_scheduled";
+          task.nextRetryAt = Date.now() + 60_000;
+          if (task.tenantId) TenantService.recordTaskStatus(task.tenantId, task.id, "retry_scheduled");
+          await updateTask(task.id, { status: "retry_scheduled", nextRetryAt: task.nextRetryAt });
+          await this.onEvent(task.id, "budget_deferred", { reason: budget.reason });
+          if (!getSupabase()) {
+            this.pending.push(task);
+          }
+          continue;
+        }
+
         if (task.tenantId) TenantService.recordTaskStatus(task.tenantId, task.id, "running");
+        BudgetService.recordGlobalRunning(task.id);
         this.running.add(task.id);
         this.process(task);
       }
@@ -259,6 +276,7 @@ export class TaskQueue {
       })
       .finally(() => {
         this.running.delete(task.id);
+        BudgetService.removeGlobalRunning(task.id);
         this.scheduleProcess();
       });
   }

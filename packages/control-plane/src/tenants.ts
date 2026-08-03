@@ -55,7 +55,7 @@ function getConfigDefaults(): TenantConfig {
   };
 }
 
-function normalizeConfig(config?: TenantConfig | null): TenantConfig {
+export function normalizeConfig(config?: TenantConfig | null): TenantConfig {
   const defaults = getConfigDefaults();
   const c = config ?? {};
   return {

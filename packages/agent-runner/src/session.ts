@@ -21,7 +21,9 @@ type CheckpointCreatedEvent = { type: "checkpoint_created"; checkpoint: Checkpoi
 type CheckpointRestoredEvent = { type: "checkpoint_restored"; checkpoint: Checkpoint };
 type TaskRewindEvent = { type: "task_rewind"; checkpointId: string; prompt: string };
 type BranchForkedEvent = { type: "branch_forked"; checkpointId: string; prompt: string; parentTaskId: string };
-export type TaskEvent = AgentSessionEvent | ProviderSwitchEvent | FallbackAppliedEvent | CheckpointCreatedEvent | CheckpointRestoredEvent | TaskRewindEvent | BranchForkedEvent;
+type CircuitBreakerEvent = { type: "circuit_breaker_triggered"; reason: string; limit: number; current: number };
+type CostAlertEvent = { type: "cost_alert"; threshold: number; limit: number; current: number };
+export type TaskEvent = AgentSessionEvent | ProviderSwitchEvent | FallbackAppliedEvent | CheckpointCreatedEvent | CheckpointRestoredEvent | TaskRewindEvent | BranchForkedEvent | CircuitBreakerEvent | CostAlertEvent;
 
 export interface RunOptions {
   prompt: string;
@@ -58,6 +60,8 @@ export class TaskRunner {
   private checkpointStore?: CheckpointStore;
   private pendingCheckpoints: Promise<void>[] = [];
   private lastToolCallId?: string;
+  private startedAt?: number;
+  private costAlertSent = false;
 
   constructor(config: DaybreakConfig) {
     this.config = config;
@@ -73,6 +77,7 @@ export class TaskRunner {
   async run(options: RunOptions): Promise<TaskResult> {
     const { prompt, cwd, systemPrompt, autoApprove, onStream, onEvent, taskId: explicitTaskId, checkpoint, isFork } = options;
     this.onEvent = onEvent;
+    this.startedAt = Date.now();
 
     const telemetry = initTelemetry({
       taskId: explicitTaskId,
@@ -255,10 +260,14 @@ export class TaskRunner {
           this.metrics.recordTurn();
           const current = this.metrics.current();
           if (current.turns >= this.config.maxTurns) {
-            this.abort(`Max turns (${this.config.maxTurns}) reached`);
+            this.abort(`Max turns (${this.config.maxTurns}) reached`, { reason: "max_turns", limit: this.config.maxTurns, current: current.turns });
           }
           if (current.estimatedCostUsd >= this.config.maxCostUsd) {
-            this.abort(`Max cost $${this.config.maxCostUsd.toFixed(2)} reached`);
+            this.abort(`Max cost $${this.config.maxCostUsd.toFixed(2)} reached`, { reason: "max_cost_usd", limit: this.config.maxCostUsd, current: current.estimatedCostUsd });
+          }
+          if (!this.costAlertSent && current.estimatedCostUsd >= this.config.maxCostUsd * this.config.costAlertThreshold) {
+            this.costAlertSent = true;
+            this.onEvent?.({ type: "cost_alert", threshold: this.config.costAlertThreshold, limit: this.config.maxCostUsd, current: current.estimatedCostUsd });
           }
 
           this.lastToolCallId = undefined;
@@ -459,7 +468,8 @@ export class TaskRunner {
   private startWallClockTimer(): void {
     const maxMs = this.config.maxWallClockMinutes * 60 * 1000;
     this.wallClockTimer = setTimeout(() => {
-      this.abort(`Max wall-clock time (${this.config.maxWallClockMinutes}m) reached`);
+      const elapsedMinutes = this.startedAt ? (Date.now() - this.startedAt) / 60_000 : this.config.maxWallClockMinutes;
+      this.abort(`Max wall-clock time (${this.config.maxWallClockMinutes}m) reached`, { reason: "max_wall_clock", limit: this.config.maxWallClockMinutes, current: elapsedMinutes });
     }, maxMs);
   }
 
@@ -493,9 +503,12 @@ export class TaskRunner {
     }
   }
 
-  private abort(reason: string): void {
+  private abort(reason: string, circuitBreaker?: { reason: string; limit: number; current: number }): void {
     if (this.abortedReason) return;
     this.abortedReason = reason;
+    if (circuitBreaker) {
+      this.onEvent?.({ type: "circuit_breaker_triggered", ...circuitBreaker });
+    }
     this.session?.abort().catch(() => {});
   }
 }

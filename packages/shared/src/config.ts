@@ -50,6 +50,8 @@ export interface DaybreakConfig {
   defaultTenantDailyCostUsd: number;
   defaultTenantTasksPerHour: number;
   defaultTenantMaxConcurrent: number;
+  globalMaxConcurrentSandboxes: number;
+  costAlertThreshold: number;
 }
 
 const DEFAULT_MAX_TURNS = 40;
@@ -74,6 +76,8 @@ const DEFAULT_QUEUE_WORKER_POLL_MS = 1000;
 const DEFAULT_TENANT_DAILY_COST_USD = 0.5;
 const DEFAULT_TENANT_TASKS_PER_HOUR = 10;
 const DEFAULT_TENANT_MAX_CONCURRENT = 2;
+const DEFAULT_GLOBAL_MAX_CONCURRENT_SANDBOXES = 5;
+const DEFAULT_COST_ALERT_THRESHOLD = 0.8;
 
 export const DEFAULT_DENYLIST_PATTERNS: string[] = [
   ".env",
@@ -203,6 +207,8 @@ export function loadConfig(envPath?: string): DaybreakConfig {
     defaultTenantDailyCostUsd: parseFloatEnv("DAYBREAK_DEFAULT_TENANT_DAILY_COST_USD", DEFAULT_TENANT_DAILY_COST_USD),
     defaultTenantTasksPerHour: parseIntEnv("DAYBREAK_DEFAULT_TENANT_TASKS_PER_HOUR", DEFAULT_TENANT_TASKS_PER_HOUR),
     defaultTenantMaxConcurrent: parseIntEnv("DAYBREAK_DEFAULT_TENANT_MAX_CONCURRENT", DEFAULT_TENANT_MAX_CONCURRENT),
+    globalMaxConcurrentSandboxes: parseIntEnv("DAYBREAK_GLOBAL_MAX_CONCURRENT_SANDBOXES", DEFAULT_GLOBAL_MAX_CONCURRENT_SANDBOXES),
+    costAlertThreshold: parseFloatEnv("DAYBREAK_COST_ALERT_THRESHOLD", DEFAULT_COST_ALERT_THRESHOLD),
   };
 }
 

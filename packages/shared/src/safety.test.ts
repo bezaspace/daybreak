@@ -25,6 +25,8 @@ const config: DaybreakConfig = {
   defaultTenantDailyCostUsd: 0.5,
   defaultTenantTasksPerHour: 10,
   defaultTenantMaxConcurrent: 2,
+  globalMaxConcurrentSandboxes: 5,
+  costAlertThreshold: 0.8,
 };
 
 describe("isSensitivePath", () => {
