@@ -313,13 +313,13 @@ Because this is a scope shift, the existing `UI_REVAMP_PLAN.md` milestones are r
 - [x] Block the tool call promise until approval is received via Redis pub/sub or polling.
 - [x] Plan-mode: agent returns a plan first, pauses, and waits for "Proceed".
 
-### Phase 6 — Composer intelligence
+### Phase 6 — Composer intelligence (done)
 
-- `@repo` autocomplete from connected GitHub repos.
-- `@file` autocomplete from the checked-out repo.
-- `#issue` / `#pr` references.
-- Slash commands: `/plan`, `/auto`, `/interactive`, `/costs`, `/cancel`, `/help`.
-- Image attachments (for UI mockups).
+- [x] `@repo` autocomplete from connected GitHub repos.
+- [x] `@file` autocomplete from the checked-out repo.
+- [x] `#issue` / `#pr` references.
+- [x] Slash commands: `/plan`, `/auto`, `/interactive`, `/costs`, `/cancel`, `/help`.
+- [x] Image attachments (for UI mockups).
 
 ### Phase 7 — Multi-session and mobile polish
 

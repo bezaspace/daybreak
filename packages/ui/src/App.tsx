@@ -14,6 +14,7 @@ import { TimeTravelView } from "./TimeTravelView.js";
 import { CiHealView } from "./CiHealView.js";
 import { DeadLetterView } from "./DeadLetterView.js";
 import { CleanupView } from "./CleanupView.js";
+import { Dialog } from "./components/base/Dialog.js";
 import type { Config, QueueStatus, Screenshot, StreamEvent, Task, TaskMetrics, ChatMessage } from "./lib/types.js";
 import { formatDuration, statusBadgeVariant } from "./lib/format.js";
 import { createUserMessage, appendEvent, buildMessagesFromEvents } from "./lib/messages.js";
@@ -60,6 +61,7 @@ export function App() {
   const [branch, setBranch] = useState("main");
   const [composerPrompt, setComposerPrompt] = useState("");
   const [mode, setMode] = useState<"plan" | "interactive" | "autopilot">("autopilot");
+  const [helpOpen, setHelpOpen] = useState(false);
 
   const [tenantId, setTenantId] = useState("");
   const [role, setRole] = useState("operator");
@@ -153,6 +155,17 @@ export function App() {
   }, []);
 
   const selectedTask = useMemo(() => tasks.find((t) => t.id === activeTaskId), [tasks, activeTaskId]);
+
+  useEffect(() => {
+    if (selectedTask) {
+      setRepo(selectedTask.repo);
+      setBranch(selectedTask.branch);
+      const taskMode = selectedTask.metadata?.mode as string | undefined;
+      if (taskMode === "plan" || taskMode === "interactive" || taskMode === "autopilot") {
+        setMode(taskMode);
+      }
+    }
+  }, [selectedTask]);
 
   useEffect(() => {
     if (!activeTaskId) return;
@@ -317,6 +330,12 @@ export function App() {
     });
   }
 
+  function handleComposerCommand(command: string) {
+    if (command === "costs") setActiveView("costs");
+    if (command === "cancel" && activeTaskId) cancelTask(activeTaskId);
+    if (command === "help") setHelpOpen(true);
+  }
+
   function handleNewSession() {
     setActiveView("chat");
     setActiveTaskId(null);
@@ -354,6 +373,7 @@ export function App() {
           mode={mode}
           isRunning={isRunning}
           taskSelected={!!selectedTask}
+          task={selectedTask}
           disabled={!!selectedTask && !isRunning}
           disabledReason={selectedTask ? "Task is not running" : undefined}
           onRepoChange={setRepo}
@@ -361,6 +381,7 @@ export function App() {
           onPromptChange={setComposerPrompt}
           onModeChange={setMode}
           onSubmit={handleComposerSubmit}
+          onCommand={handleComposerCommand}
         />
       </>
     ) : (
@@ -413,7 +434,18 @@ export function App() {
     );
 
   return (
-    <ChatLayout
+    <>
+      <Dialog open={helpOpen} onOpenChange={setHelpOpen} title="Composer shortcuts">
+        <div className="space-y-2 text-sm text-db-text-secondary">
+          <p><code className="rounded bg-db-elevated px-1 text-db-text">@repo</code> autocomplete allowed repos</p>
+          <p><code className="rounded bg-db-elevated px-1 text-db-text">@file</code> autocomplete files in the checked-out repo</p>
+          <p><code className="rounded bg-db-elevated px-1 text-db-text">#123</code> autocomplete issues and PRs</p>
+          <p><code className="rounded bg-db-elevated px-1 text-db-text">/plan</code>, <code className="rounded bg-db-elevated px-1 text-db-text">/interactive</code>, <code className="rounded bg-db-elevated px-1 text-db-text">/auto</code> switch mode</p>
+          <p><code className="rounded bg-db-elevated px-1 text-db-text">/costs</code>, <code className="rounded bg-db-elevated px-1 text-db-text">/cancel</code>, <code className="rounded bg-db-elevated px-1 text-db-text">/help</code> open views or actions</p>
+          <p>Paste or attach images to include them as markdown in your message.</p>
+        </div>
+      </Dialog>
+      <ChatLayout
       left={
         <ConversationSidebar
           tasks={tasks}
@@ -440,5 +472,6 @@ export function App() {
         ) : undefined
       }
     />
+    </>
   );
 }

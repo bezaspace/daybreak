@@ -30,6 +30,7 @@ export interface Task {
   checkRunId?: string;
   healAttempt?: number;
   prompt?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface ChatMessage {

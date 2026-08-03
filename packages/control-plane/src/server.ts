@@ -1108,6 +1108,48 @@ app.get("/api/config", (c) => {
   });
 });
 
+app.get("/api/repos", (c) => {
+  const allowlist = config.githubWebhookRepoAllowlist || "";
+  const patterns = allowlist.split(",").map((s) => s.trim()).filter(Boolean);
+  const repos = patterns.map((p) => {
+    const [owner, name] = p.split("/");
+    return { fullName: p, url: `https://github.com/${p}`, owner: owner || "", name: name || "" };
+  });
+  return c.json({ repos });
+});
+
+app.get("/api/repos/:owner/:repo/issues-prs", async (c) => {
+  const owner = c.req.param("owner");
+  const repo = c.req.param("repo");
+  if (!config.githubToken) {
+    return c.json({ items: [] });
+  }
+  try {
+    const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues?state=open&per_page=20`, {
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${config.githubToken}`,
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "unknown");
+      console.error(`[control-plane] issues fetch failed: ${res.status} ${text}`);
+      return c.json({ error: "failed to fetch issues" }, 502);
+    }
+    const data = (await res.json()) as Array<{ number: number; title: string; pull_request?: { url: string } | null }>;
+    const items = data.map((item) => ({
+      number: item.number,
+      title: item.title,
+      type: (item.pull_request ? "pr" : "issue") as "pr" | "issue",
+    }));
+    return c.json({ items });
+  } catch (error) {
+    console.error(`[control-plane] issues error for ${owner}/${repo}:`, error);
+    return c.json({ error: String(error), items: [] }, 503);
+  }
+});
+
 app.get("/api/tasks", async (c) => {
   const dbTasks = await getTasks();
   const merged = new Map<string, Task>();
