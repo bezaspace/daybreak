@@ -295,15 +295,15 @@ Because this is a scope shift, the existing `UI_REVAMP_PLAN.md` milestones are r
 - [x] Pipe user messages into `AgentSession.sendUserMessage`/`steer`/`followUp`.
 - [x] Ensure the SSE stream reflects user messages and assistant responses.
 
-### Phase 4 — Artifact/sandbox panel
+### Phase 4 — Artifact/sandbox panel (done)
 
-- Terminal tab: streaming ANSI output.
-- Browser tab: live screenshots and URL.
-- Files tab: sandbox file tree.
-- Checkpoints tab: timeline with rewind/fork.
-- Trace tab: Langfuse trace viewer.
-- Costs tab: cost/turns chart.
-- Diff tab: changed files since base branch.
+- [x] Terminal tab: streaming ANSI output.
+- [x] Browser tab: live screenshots and URL.
+- [x] Files tab: sandbox file tree.
+- [x] Checkpoints tab: timeline with rewind/fork.
+- [x] Trace tab: Langfuse trace viewer.
+- [x] Costs tab: cost/turns chart.
+- [x] Diff tab: changed files since base branch.
 
 ### Phase 5 — Human-in-the-loop approvals
 

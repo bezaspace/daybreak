@@ -1622,6 +1622,85 @@ app.get("/api/checkpoints/:id", async (c) => {
   return c.json(checkpoint);
 });
 
+app.get("/api/tasks/:id/files", async (c) => {
+  const id = c.req.param("id");
+  const path = c.req.query("path") || "/home/user/target";
+  const task = tasks.get(id) ?? (await getTask(id));
+  if (!task) return c.json({ error: "task not found" }, 404);
+
+  if (!config.e2bApiKey) {
+    return c.json({ error: "E2B_API_KEY not configured" }, 503);
+  }
+
+  const sandboxId = await resolveTaskSandboxId(task);
+  if (!sandboxId) {
+    return c.json({ entries: [] }, 200);
+  }
+
+  try {
+    const Sandbox = await getE2BSandboxClass();
+    const sandbox = await Sandbox.connect(sandboxId, { apiKey: config.e2bApiKey });
+    const entries = await sandbox.files.list(path);
+    return c.json({ path, entries });
+  } catch (error) {
+    console.error(`[control-plane] files list failed for ${id} ${path}:`, error);
+    return c.json({ error: String(error), entries: [] }, 503);
+  }
+});
+
+app.get("/api/tasks/:id/diff", async (c) => {
+  const id = c.req.param("id");
+  const task = tasks.get(id) ?? (await getTask(id));
+  if (!task) return c.json({ error: "task not found" }, 404);
+  if (!config.githubToken) {
+    return c.json({ error: "GITHUB_TOKEN not configured" }, 503);
+  }
+
+  const parsed = parseRepo(task.repo);
+  if (!parsed || !task.prBranch) {
+    return c.json({ files: [] }, 200);
+  }
+
+  try {
+    const base = encodeURIComponent(task.branch);
+    const head = encodeURIComponent(task.prBranch);
+    const res = await fetch(
+      `https://api.github.com/repos/${parsed.owner}/${parsed.repo}/compare/${base}...${head}`,
+      {
+        headers: {
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${config.githubToken}`,
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
+      },
+    );
+    if (!res.ok) {
+      const text = await res.text().catch(() => "unknown");
+      console.error(`[control-plane] diff fetch failed: ${res.status} ${text}`);
+      return c.json({ error: "failed to fetch diff from GitHub", files: [] }, 502);
+    }
+    const data = (await res.json()) as {
+      files?: Array<{
+        filename: string;
+        status: string;
+        additions: number;
+        deletions: number;
+        patch?: string;
+      }>;
+      ahead_by?: number;
+      behind_by?: number;
+    };
+    return c.json({
+      files: data.files || [],
+      aheadBy: data.ahead_by ?? 0,
+      behindBy: data.behind_by ?? 0,
+    });
+  } catch (error) {
+    console.error(`[control-plane] diff error for ${id}:`, error);
+    return c.json({ error: String(error), files: [] }, 503);
+  }
+});
+
 app.post("/api/checkpoints/:checkpointId/fork", async (c) => {
   const checkpointId = c.req.param("checkpointId");
   const body = await c.req.json().catch(() => ({}));

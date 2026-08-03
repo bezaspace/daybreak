@@ -284,6 +284,30 @@ export function App() {
     }
   }
 
+  async function handleFork(checkpointId: string, prompt: string) {
+    const res = await fetch(`/api/checkpoints/${checkpointId}/fork`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...tenantHeaders() },
+      body: JSON.stringify({ prompt }),
+    });
+    const data = (await res.json()) as { taskId?: string; error?: string };
+    if (data.taskId) {
+      setActiveTaskId(data.taskId);
+      setActiveView("chat");
+    } else {
+      setStatus(data.error ?? "fork failed");
+    }
+  }
+
+  async function handleRewind(checkpointId: string, prompt: string) {
+    if (!activeTaskId) return;
+    await fetch(`/api/tasks/${activeTaskId}/rewind`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...tenantHeaders() },
+      body: JSON.stringify({ checkpointId, prompt }),
+    });
+  }
+
   function handleNewSession() {
     setActiveView("chat");
     setActiveTaskId(null);
@@ -401,6 +425,8 @@ export function App() {
             metrics={metrics}
             activeProvider={activeProvider}
             costAlert={costAlert}
+            onRewind={handleRewind}
+            onFork={handleFork}
           />
         ) : undefined
       }
