@@ -112,19 +112,19 @@ This document breaks the Phase 5 exit criteria into small, independently-demoabl
 
 **What it ships:** Daybreak cannot be looped into an infinite self-heal cycle, cannot heal the same failed run twice, and cannot act on protected or non-Daybreak branches.
 
-- [ ] Add per-PR heal attempt counter:
+- [x] Add per-PR heal attempt counter:
   - Before spawning a heal task, query `tasks` for `repo` + `prNumber` + `triggerSource = "check_run"` in the last 24 hours.
   - If count >= `DAYBREAK_MAX_HEAL_ATTEMPTS_PER_PR` (default `2`), emit `heal_skipped` with reason `max heal attempts reached` and return `200`.
-- [ ] Add in-flight guard:
+- [x] Add in-flight guard:
   - If a `check_run` heal task for the same `prBranch` is already `running`, skip the new webhook with a `heal_skipped` event.
-- [ ] Add delivery / check-run deduplication:
+- [x] Add delivery / check-run deduplication:
   - Reuse existing `isDuplicateDelivery` (`X-GitHub-Delivery`) to ignore retries.
   - Also set a Redis key `daybreak:heal-checkrun:{checkRunId}` with 24-hour TTL to avoid duplicate heals if GitHub redelivers with a new delivery ID.
-- [ ] Add branch-safety guard:
+- [x] Add branch-safety guard:
   - Refuse to heal if `headBranch` matches `main`, `master`, or `protectedBranches`.
   - Refuse to heal if `headBranch` does not match `DAYBREAK_PR_BRANCH_PREFIX` and is not a known `pr_branch` in `tasks`.
-- [ ] Add `DAYBREAK_HEAL_COOLDOWN_SECONDS` (default `60`) to prevent rapid re-triggering on the same commit; skip if a heal for the same `headSha` was started within the cooldown window.
-- [ ] Update `packages/control-plane/src/server.test.ts`:
+- [x] Add `DAYBREAK_HEAL_COOLDOWN_SECONDS` (default `60`) to prevent rapid re-triggering on the same commit; skip if a heal for the same `headSha` was started within the cooldown window.
+- [x] Update `packages/control-plane/src/server.test.ts`:
   - Test that the third heal attempt for the same PR is skipped.
   - Test that a `check_run` for a protected branch is ignored.
 

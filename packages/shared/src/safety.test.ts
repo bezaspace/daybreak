@@ -18,6 +18,7 @@ const config: DaybreakConfig = {
   maxHealAttemptsPerPr: 2,
   maxCiLogBytes: 524288,
   ciLogContextLines: 20,
+  healCooldownSeconds: 60,
 };
 
 describe("isSensitivePath", () => {

@@ -867,7 +867,7 @@ ${errorContext || "No detailed error context was available."}
 Investigate the repo, reproduce the failure, apply the minimal fix, run the failing test command, and push a follow-up commit to branch ${headBranch}. Do not open a new PR.`;
 }
 
-async function countHealAttempts(repo: string, prNumber: number | undefined, prBranch: string): Promise<number> {
+async function getCheckRunTasks(repo: string, prNumber: number | undefined, prBranch: string): Promise<Task[]> {
   const inMemory = Array.from(tasks.values()).filter(
     (t) => t.repo === repo && t.triggerSource === "check_run" && (t.prNumber === prNumber || t.prBranch === prBranch),
   );
@@ -876,12 +876,67 @@ async function countHealAttempts(repo: string, prNumber: number | undefined, prB
     (t) => t.repo === repo && t.triggerSource === "check_run" && (t.prNumber === prNumber || t.prBranch === prBranch),
   );
   const seen = new Set<string>();
+  const all: Task[] = [];
   for (const t of [...inMemory, ...dbMatches]) {
     if (!seen.has(t.id)) {
       seen.add(t.id);
+      all.push(t);
     }
   }
-  return seen.size;
+  return all.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
+}
+
+async function countHealAttempts(repo: string, prNumber: number | undefined, prBranch: string, windowMs?: number): Promise<number> {
+  const all = await getCheckRunTasks(repo, prNumber, prBranch);
+  if (!windowMs) {
+    return all.length;
+  }
+  const since = Date.now() - windowMs;
+  return all.filter((t) => t.startedAt > since).length;
+}
+
+async function findRunningHealTask(repo: string, prNumber: number | undefined, prBranch: string): Promise<Task | undefined> {
+  const all = await getCheckRunTasks(repo, prNumber, prBranch);
+  return all.find((t) => t.status === "running");
+}
+
+async function findRecentHealForSha(repo: string, headSha: string, windowMs: number): Promise<Task | undefined> {
+  const inMemory = Array.from(tasks.values()).filter(
+    (t) => t.repo === repo && t.triggerSource === "check_run" && t.headSha === headSha && t.startedAt > Date.now() - windowMs,
+  );
+  const db = await getTasks();
+  const dbMatches = db.filter(
+    (t) => t.repo === repo && t.triggerSource === "check_run" && t.headSha === headSha && t.startedAt > Date.now() - windowMs,
+  );
+  const seen = new Set<string>();
+  const all: Task[] = [];
+  for (const t of [...inMemory, ...dbMatches]) {
+    if (!seen.has(t.id)) {
+      seen.add(t.id);
+      all.push(t);
+    }
+  }
+  return all.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))[0];
+}
+
+async function getHealingTaskForCheckRun(checkRunId: string): Promise<string | undefined> {
+  try {
+    const redis = getRedis();
+    const value = (await redis.get(`daybreak:heal-checkrun:${checkRunId}`)) as string | null;
+    return value || undefined;
+  } catch (error) {
+    console.error(`[control-plane] failed to check check-run dedupe key for ${checkRunId}:`, error);
+    return undefined;
+  }
+}
+
+async function markCheckRunAsHealed(checkRunId: string, taskId: string) {
+  try {
+    const redis = getRedis();
+    await redis.set(`daybreak:heal-checkrun:${checkRunId}`, taskId, { ex: 60 * 60 * 24 });
+  } catch (error) {
+    console.error(`[control-plane] failed to mark check-run ${checkRunId} as healed:`, error);
+  }
 }
 
 async function runHeal(spec: {
@@ -957,6 +1012,10 @@ async function runHeal(spec: {
   });
   tasks.set(taskId, task);
   await persistTask(task);
+
+  if (spec.checkRunId) {
+    await markCheckRunAsHealed(spec.checkRunId, taskId);
+  }
 
   await publishEvent(taskId, "ci_failure_received", {
     checkRunId: spec.checkRunId,
@@ -1209,11 +1268,35 @@ app.post(
         const checkName = typeof checkRun.name === "string" ? checkRun.name : "";
         const checkRunOutput = asRecord(checkRun.output) as CheckRunOutput | undefined;
 
-        const healCount = await countHealAttempts(repoUrl, prNumber, headBranch);
-        if (healCount >= config.maxHealAttemptsPerPr) {
+        const duplicateCheckRunTaskId = checkRunId ? await getHealingTaskForCheckRun(checkRunId) : undefined;
+        if (duplicateCheckRunTaskId) {
+          await publishEvent(duplicateCheckRunTaskId, "heal_skipped", { reason: "duplicate check run", checkRunId, headSha, prBranch: headBranch });
+          return c.json({ ok: true, note: "duplicate check run" }, 200);
+        }
+
+        const inFlight = await findRunningHealTask(repoUrl, prNumber, headBranch);
+        if (inFlight) {
+          await publishEvent(inFlight.id, "heal_skipped", { reason: "heal already in flight", checkRunId, headSha, prBranch: headBranch });
+          return c.json({ ok: true, note: "heal already in flight" }, 200);
+        }
+
+        const recentHealCount = await countHealAttempts(repoUrl, prNumber, headBranch, 24 * 60 * 60 * 1000);
+        if (recentHealCount >= config.maxHealAttemptsPerPr) {
+          const latest = (await getCheckRunTasks(repoUrl, prNumber, headBranch))[0];
+          if (latest) {
+            await publishEvent(latest.id, "heal_skipped", { reason: "max heal attempts reached", checkRunId, headSha, prBranch: headBranch });
+          }
           return c.json({ ok: true, note: "max heal attempts reached" }, 200);
         }
-        const healAttempt = healCount + 1;
+
+        const cooldownMs = config.healCooldownSeconds * 1000;
+        const recentSha = await findRecentHealForSha(repoUrl, headSha, cooldownMs);
+        if (recentSha) {
+          await publishEvent(recentSha.id, "heal_skipped", { reason: "heal cooldown", checkRunId, headSha, prBranch: headBranch });
+          return c.json({ ok: true, note: "heal cooldown" }, 200);
+        }
+
+        const healAttempt = (await countHealAttempts(repoUrl, prNumber, headBranch)) + 1;
 
         const task = await runHeal({
           repo: repoUrl,

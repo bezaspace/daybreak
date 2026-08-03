@@ -43,6 +43,7 @@ export interface DaybreakConfig {
   maxHealAttemptsPerPr: number;
   maxCiLogBytes: number;
   ciLogContextLines: number;
+  healCooldownSeconds: number;
 }
 
 const DEFAULT_MAX_TURNS = 40;
@@ -61,6 +62,7 @@ const DEFAULT_PR_BRANCH_PREFIX = "daybreak/";
 const DEFAULT_MAX_HEAL_ATTEMPTS_PER_PR = 2;
 const DEFAULT_MAX_CI_LOG_BYTES = 524288;
 const DEFAULT_CI_LOG_CONTEXT_LINES = 20;
+const DEFAULT_HEAL_COOLDOWN_SECONDS = 60;
 
 export const DEFAULT_DENYLIST_PATTERNS: string[] = [
   ".env",
@@ -183,6 +185,7 @@ export function loadConfig(envPath?: string): DaybreakConfig {
     maxHealAttemptsPerPr: parseIntEnv("DAYBREAK_MAX_HEAL_ATTEMPTS_PER_PR", DEFAULT_MAX_HEAL_ATTEMPTS_PER_PR),
     maxCiLogBytes: parseIntEnv("DAYBREAK_MAX_CI_LOG_BYTES", DEFAULT_MAX_CI_LOG_BYTES),
     ciLogContextLines: parseIntEnv("DAYBREAK_CI_LOG_CONTEXT_LINES", DEFAULT_CI_LOG_CONTEXT_LINES),
+    healCooldownSeconds: parseIntEnv("DAYBREAK_HEAL_COOLDOWN_SECONDS", DEFAULT_HEAL_COOLDOWN_SECONDS),
   };
 }
 

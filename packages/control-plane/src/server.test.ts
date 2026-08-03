@@ -53,6 +53,7 @@ describe("control-plane webhooks", () => {
     process.env.GITHUB_WEBHOOK_RATE_LIMIT = "100";
     process.env.GITHUB_TOKEN = "ghp_test";
     process.env.E2B_API_KEY = "e2b_test";
+    process.env.DAYBREAK_HEAL_COOLDOWN_SECONDS = "0";
     delete process.env.SUPABASE_URL;
     delete process.env.SUPABASE_SERVICE_KEY;
     delete process.env.UPSTASH_REDIS_REST_URL;
@@ -220,22 +221,22 @@ describe("time-travel endpoints", () => {
   });
 
 describe("check_run webhooks", () => {
-    function makeCheckRunBody({ branch, conclusion, repo = "bezaspace/daybreak-target", prNumber = 42 }: { branch: string; conclusion: string; repo?: string; prNumber?: number }) {
+    function makeCheckRunBody({ branch, conclusion, repo = "bezaspace/daybreak-target", prNumber = 42, checkRunId = 987654321, headSha = "abc123def456" }: { branch: string; conclusion: string; repo?: string; prNumber?: number; checkRunId?: number; headSha?: string }) {
       const [owner, name] = repo.split("/");
       return {
         action: "completed",
         repository: { full_name: repo, clone_url: `https://github.com/${repo}.git`, default_branch: "main", owner: { login: owner }, name },
         check_run: {
-          id: 987654321,
+          id: checkRunId,
           name: "test",
-          head_sha: "abc123def456",
+          head_sha: headSha,
           status: "completed",
           conclusion,
           output: { title: null, summary: "", text: "", annotations_count: 0, annotations_url: "" },
           check_suite: {
             id: 123456789,
             head_branch: branch,
-            head_sha: "abc123def456",
+            head_sha: headSha,
             status: "completed",
             conclusion,
             pull_requests: [{ number: prNumber, head: { ref: branch }, base: { ref: "main" } }],
@@ -310,6 +311,30 @@ describe("check_run webhooks", () => {
       const tasks = (await tasksRes.json()) as Array<{ repo: string; prBranch: string; triggerSource?: string }>;
       const task = tasks.find((t) => t.repo === "https://github.com/bezaspace/daybreak-target.git" && t.prBranch === branch && t.triggerSource === "check_run");
       expect(task).toBeUndefined();
+    });
+
+    it("skips a third heal attempt for the same PR within 24 hours", async () => {
+      const branch = "daybreak/heal-limit-test";
+      const base = { branch, conclusion: "failure" as const, prNumber: 100 };
+
+      const first = await app.request("/api/webhooks/github", await makeGitHubWebhookPayload("check_run", makeCheckRunBody({ ...base, checkRunId: 1000001 })));
+      expect(first.status).toBe(202);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const second = await app.request("/api/webhooks/github", await makeGitHubWebhookPayload("check_run", makeCheckRunBody({ ...base, checkRunId: 1000002 })));
+      expect(second.status).toBe(202);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const third = await app.request("/api/webhooks/github", await makeGitHubWebhookPayload("check_run", makeCheckRunBody({ ...base, checkRunId: 1000003 })));
+      expect(third.status).toBe(200);
+      const thirdJson = (await third.json()) as { ok: boolean; note?: string };
+      expect(thirdJson.ok).toBe(true);
+      expect(thirdJson.note).toContain("max heal attempts");
+
+      const tasksRes = await app.request("/api/tasks");
+      const allTasks = (await tasksRes.json()) as Array<{ repo: string; prBranch: string; triggerSource?: string }>;
+      const prTasks = allTasks.filter((t) => t.repo === "https://github.com/bezaspace/daybreak-target.git" && t.prBranch === branch && t.triggerSource === "check_run");
+      expect(prTasks.length).toBe(2);
     });
   });
 });
