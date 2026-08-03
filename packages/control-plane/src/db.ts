@@ -32,6 +32,7 @@ export interface PersistedTask {
   claimed_at?: string | null;
   worker_id?: string | null;
   metadata?: unknown | null;
+  idempotency_key?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -79,6 +80,7 @@ export interface Task {
   maxTurns?: number;
   maxCostUsd?: number;
   maxWallClockMinutes?: number;
+  idempotencyKey?: string;
 }
 
 export interface PersistedWorkspace {
@@ -151,6 +153,7 @@ function toTask(row: PersistedTask): Task {
     claimedAt: row.claimed_at ? new Date(row.claimed_at).getTime() : undefined,
     workerId: row.worker_id ?? undefined,
     metadata: (row.metadata as Record<string, unknown>) ?? undefined,
+    idempotencyKey: row.idempotency_key ?? undefined,
   };
 }
 
@@ -187,6 +190,7 @@ export async function persistTask(task: Task): Promise<boolean> {
     claimed_at: task.claimedAt ? new Date(task.claimedAt).toISOString() : null,
     worker_id: task.workerId ?? null,
     metadata: task.metadata ?? null,
+    idempotency_key: task.idempotencyKey ?? null,
     updated_at: new Date().toISOString(),
   });
   if (error) {
@@ -218,6 +222,7 @@ export async function updateTask(id: string, updates: Partial<Task>): Promise<bo
   if (updates.claimedAt !== undefined) payload.claimed_at = updates.claimedAt ? new Date(updates.claimedAt).toISOString() : null;
   if (updates.workerId !== undefined) payload.worker_id = updates.workerId ?? null;
   if (updates.metadata !== undefined) payload.metadata = updates.metadata ?? null;
+  if (updates.idempotencyKey !== undefined) payload.idempotency_key = updates.idempotencyKey ?? null;
   const { error } = await supabase.from("tasks").update(payload).eq("id", id);
   if (error) {
     console.error("[db] updateTask error:", error.message);

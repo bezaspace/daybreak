@@ -3,8 +3,8 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
-import { Redis } from "@upstash/redis";
 import { loadConfig } from "@daybreak/shared";
+import { getRedis } from "./redis.js";
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
@@ -29,6 +29,7 @@ import {
 } from "./db.js";
 import { CiLogFetcher, CiLogParser, type CheckRunOutput } from "./ci-logs.js";
 import { TaskQueue, type TaskSpec } from "./queue.js";
+import { createIdempotencyKey, IdempotencyStore } from "./idempotency.js";
 
 const repoRoot = resolve(import.meta.dirname ?? process.cwd(), "../..");
 
@@ -78,16 +79,6 @@ async function createPullRequest(repoUrl: string, headBranch: string, baseBranch
   }
   const data = (await res.json()) as { html_url: string; number: number };
   return { url: data.html_url, number: data.number };
-}
-
-function getRedis() {
-  const config = loadConfig();
-  const url = config.upstashRedisRestUrl || process.env.UPSTASH_REDIS_REST_URL;
-  const token = config.upstashRedisToken || process.env.UPSTASH_REDIS_TOKEN;
-  if (!url || !token) {
-    throw new Error("UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_TOKEN are required");
-  }
-  return new Redis({ url, token });
 }
 
 const LOG_DIR = join(tmpdir(), "daybreak-logs");
@@ -222,18 +213,6 @@ function buildIssuePrompt(repoUrl: string, branch: string, prBranch: string, iss
 
 function buildReviewPrompt(repoUrl: string, prNumber: number, baseBranch: string, headBranch: string, body: string): string {
   return `A reviewer left feedback on PR #${prNumber} in ${repoUrl} (base: ${baseBranch}, head: ${headBranch}):\n\n${body}\n\nPlease address the feedback on the existing PR branch ${headBranch}, run the tests, and push a follow-up commit.`;
-}
-
-async function isDuplicateDelivery(deliveryId: string): Promise<boolean> {
-  try {
-    const redis = getRedis();
-    const key = `daybreak:webhook:${deliveryId}`;
-    const stored = await redis.set(key, "1", { nx: true, ex: 60 * 60 * 24 });
-    return stored === null;
-  } catch (error) {
-    console.error(`[control-plane] failed to check webhook delivery idempotency:`, error);
-    return false;
-  }
 }
 
 async function executeTask(task: Task): Promise<void> {
@@ -490,7 +469,16 @@ async function spawnFork(
   prompt: string,
   strategy: "git-reinstall" | "snapshot" = "git-reinstall",
   snapshotId?: string,
+  idempotencyKey?: string,
 ): Promise<Task> {
+  if (idempotencyKey) {
+    const existing = await idempotencyStore.get(idempotencyKey);
+    if (existing) {
+      const existingTask = existing.task ?? (await getTask(existing.taskId)) ?? tasks.get(existing.taskId);
+      if (existingTask) return existingTask;
+    }
+  }
+
   const prBranch = `daybreak/fork-${randomUUID()}`;
   const child = taskFrom({
     repo: parent.repo,
@@ -504,6 +492,15 @@ async function spawnFork(
   });
   tasks.set(child.id, child);
   await persistTask(child);
+
+  if (idempotencyKey) {
+    const created = await idempotencyStore.tryCreate(idempotencyKey, child.id, child);
+    if (!created || created.taskId !== child.id) {
+      const existingTask = created?.task ?? (await getTask(created?.taskId ?? child.id)) ?? tasks.get(created?.taskId ?? child.id);
+      return existingTask ?? child;
+    }
+  }
+
   await updateCheckpoint(checkpoint.id, { branchTaskId: child.id });
   await publishEvent(child.id, "task_start", { repo: child.repo, branch: child.branch, prBranch: child.prBranch, parentTaskId: parent.id, parentCheckpointId: checkpoint.id });
 
@@ -907,26 +904,6 @@ async function findRecentHealForSha(repo: string, headSha: string, windowMs: num
   return all.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))[0];
 }
 
-async function getHealingTaskForCheckRun(checkRunId: string): Promise<string | undefined> {
-  try {
-    const redis = getRedis();
-    const value = (await redis.get(`daybreak:heal-checkrun:${checkRunId}`)) as string | null;
-    return value || undefined;
-  } catch (error) {
-    console.error(`[control-plane] failed to check check-run dedupe key for ${checkRunId}:`, error);
-    return undefined;
-  }
-}
-
-async function markCheckRunAsHealed(checkRunId: string, taskId: string) {
-  try {
-    const redis = getRedis();
-    await redis.set(`daybreak:heal-checkrun:${checkRunId}`, taskId, { ex: 60 * 60 * 24 });
-  } catch (error) {
-    console.error(`[control-plane] failed to mark check-run ${checkRunId} as healed:`, error);
-  }
-}
-
 async function buildHealContext(task: Task): Promise<{ prompt: string; annotationsCount: number; logBytes: number; errorContextLength: number }> {
   const repoUrl = task.repo;
   const parsed = parseRepo(repoUrl);
@@ -1048,6 +1025,7 @@ async function executeHeal(task: Task): Promise<void> {
 }
 
 const config = loadConfig();
+const idempotencyStore = new IdempotencyStore();
 
 const queue = new TaskQueue({
   maxConcurrent: config.maxConcurrentTasks,
@@ -1055,6 +1033,7 @@ const queue = new TaskQueue({
   onClaim: executeTask,
   onEvent: (taskId, type, data) => publishEvent(taskId, type, data),
   workerId: process.env.HOSTNAME || `worker-${randomUUID().slice(0, 8)}`,
+  idempotencyStore,
 });
 
 if (config.queueWorkerEnabled && process.env.NODE_ENV !== "test") {
@@ -1133,16 +1112,21 @@ app.post("/api/tasks", async (c) => {
     return c.json({ error: "repo is required" }, 400);
   }
 
+  const idempotencyKey = c.req.header("idempotency-key") || createIdempotencyKey([repo, branch, prompt ?? "", "dashboard"].join("|"));
+
   try {
-    const task = await queue.enqueue({
-      repo,
-      branch,
-      prompt,
-      triggerSource: "dashboard",
-      maxTurns: body.maxTurns,
-      maxCostUsd: body.maxCostUsd,
-      maxWallClockMinutes: body.maxWallClockMinutes,
-    });
+    const task = await queue.enqueue(
+      {
+        repo,
+        branch,
+        prompt,
+        triggerSource: "dashboard",
+        maxTurns: body.maxTurns,
+        maxCostUsd: body.maxCostUsd,
+        maxWallClockMinutes: body.maxWallClockMinutes,
+      },
+      { idempotencyKey },
+    );
     return c.json({ taskId: task.id, repo, branch, status: task.status }, 202);
   } catch (error) {
     if (error instanceof TaskRejectedError) {
@@ -1174,10 +1158,6 @@ app.post(
     const raw = Buffer.from(await c.req.arrayBuffer());
     if (!verifyWebhookSignature(config.githubWebhookSecret, raw, signature)) {
       return c.json({ error: "invalid signature" }, 401);
-    }
-
-    if (await isDuplicateDelivery(deliveryId)) {
-      return c.json({ ok: true, note: "duplicate delivery" }, 200);
     }
 
     const payload = JSON.parse(raw.toString("utf-8")) as Record<string, unknown>;
@@ -1261,12 +1241,6 @@ app.post(
         const checkName = typeof checkRun.name === "string" ? checkRun.name : "";
         const checkRunOutput = asRecord(checkRun.output) as CheckRunOutput | undefined;
 
-        const duplicateCheckRunTaskId = checkRunId ? await getHealingTaskForCheckRun(checkRunId) : undefined;
-        if (duplicateCheckRunTaskId) {
-          await publishEvent(duplicateCheckRunTaskId, "heal_skipped", { reason: "duplicate check run", checkRunId, headSha, prBranch: headBranch });
-          return c.json({ ok: true, note: "duplicate check run" }, 200);
-        }
-
         const inFlight = await findRunningHealTask(repoUrl, prNumber, headBranch);
         if (inFlight) {
           await publishEvent(inFlight.id, "heal_skipped", { reason: "heal already in flight", checkRunId, headSha, prBranch: headBranch });
@@ -1291,6 +1265,15 @@ app.post(
 
         const healAttempt = (await countHealAttempts(repoUrl, prNumber, headBranch)) + 1;
 
+        const checkRunIdempotencyKey = checkRunId ? `heal:${repoFullName}:${checkRunId}` : undefined;
+        if (checkRunIdempotencyKey) {
+          const existing = await idempotencyStore.get(checkRunIdempotencyKey);
+          if (existing?.taskId) {
+            await publishEvent(existing.taskId, "heal_skipped", { reason: "duplicate check run", checkRunId, headSha, prBranch: headBranch });
+            return c.json({ ok: true, note: "duplicate check run", taskId: existing.taskId }, 200);
+          }
+        }
+
         const task = await queue.enqueue({
           repo: repoUrl,
           branch: baseBranch,
@@ -1306,11 +1289,8 @@ app.post(
           healAttempt,
           parentTaskId: originalTask?.id,
           metadata: { checkSuiteId, checkName, output: checkRunOutput as Record<string, unknown> },
+          idempotencyKey: checkRunIdempotencyKey,
         });
-
-        if (checkRunId) {
-          await markCheckRunAsHealed(checkRunId, task.id);
-        }
 
         return c.json({ taskId: task.id, repo: repoFullName, branch: baseBranch, prBranch: headBranch, headSha, status: task.status }, 202);
       }
@@ -1336,7 +1316,8 @@ app.post(
         const issueBody = typeof issue.body === "string" ? issue.body : "";
         const issuePrBranch = `daybreak/${randomUUID()}`;
         const prompt = buildIssuePrompt(repoUrl, defaultBranch, issuePrBranch, { title: issueTitle, body: issueBody }, stripMention(commentBody));
-        const task = await queue.enqueue({ repo: repoUrl, branch: defaultBranch, prBranch: issuePrBranch, prompt, triggerSource: "issue_comment", githubSender: typeof sender === "string" ? sender : undefined });
+        const idempotencyKey = `github-delivery:${deliveryId}`;
+        const task = await queue.enqueue({ repo: repoUrl, branch: defaultBranch, prBranch: issuePrBranch, prompt, triggerSource: "issue_comment", githubSender: typeof sender === "string" ? sender : undefined }, { idempotencyKey });
         return c.json({ taskId: task.id, repo: repoFullName, branch: defaultBranch, status: task.status }, 202);
       }
       case "pull_request_review_comment": {
@@ -1361,6 +1342,8 @@ app.post(
         const prompt = buildReviewPrompt(repoUrl, prNumber, baseRef, headRef, stripMention(commentBody));
         const reviewOriginalTask = await findOriginalTask(repoUrl, prNumber, headRef);
         const prBranch = reviewOriginalTask?.prBranch ?? headRef;
+        const commentId = typeof comment?.id === "number" ? String(comment.id) : (typeof comment?.id === "string" ? comment.id : "");
+        const idempotencyKey = `review:${repoFullName}:${prNumber}:${commentId}`;
         const task = await queue.enqueue({
           repo: repoUrl,
           branch: baseRef,
@@ -1372,7 +1355,7 @@ app.post(
           sandboxId: reviewOriginalTask?.sandboxId,
           keepAliveUntil: reviewOriginalTask?.keepAliveUntil,
           parentTaskId: reviewOriginalTask?.id,
-        });
+        }, { idempotencyKey });
         return c.json({ taskId: task.id, repo: repoFullName, branch: baseRef, prBranch, status: task.status }, 202);
       }
       case "pull_request_review": {
@@ -1397,6 +1380,8 @@ app.post(
         const prompt = buildReviewPrompt(repoUrl, prNumber, baseRef, headRef, stripMention(reviewBody));
         const prReviewOriginalTask = await findOriginalTask(repoUrl, prNumber, headRef);
         const prBranch = prReviewOriginalTask?.prBranch ?? headRef;
+        const reviewId = typeof review?.id === "number" ? String(review.id) : (typeof review?.id === "string" ? review.id : "");
+        const idempotencyKey = `review:${repoFullName}:${prNumber}:${reviewId}`;
         const task = await queue.enqueue({
           repo: repoUrl,
           branch: baseRef,
@@ -1408,7 +1393,7 @@ app.post(
           sandboxId: prReviewOriginalTask?.sandboxId,
           keepAliveUntil: prReviewOriginalTask?.keepAliveUntil,
           parentTaskId: prReviewOriginalTask?.id,
-        });
+        }, { idempotencyKey });
         return c.json({ taskId: task.id, repo: repoFullName, branch: baseRef, prBranch, status: task.status }, 202);
       }
       default: {
@@ -1472,12 +1457,14 @@ app.post("/api/checkpoints/:checkpointId/fork", async (c) => {
   const parent = tasks.get(checkpoint.taskId) ?? (await getTask(checkpoint.taskId));
   if (!parent) return c.json({ error: "parent task not found" }, 404);
 
+  const forkIdempotencyKey = `fork:${checkpointId}:${createIdempotencyKey(prompt)}`;
   const child = await spawnFork(
     parent,
     checkpoint,
     prompt,
     strategy as "git-reinstall" | "snapshot",
     typeof snapshotId === "string" ? snapshotId : undefined,
+    forkIdempotencyKey,
   );
   await publishEvent(parent.id, "branch_forked", { childTaskId: child.id, checkpointId, prompt, strategy });
   return c.json({ taskId: child.id, status: child.status, prBranch: child.prBranch, strategy }, 202);

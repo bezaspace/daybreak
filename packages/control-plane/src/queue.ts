@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Task } from "./db.js";
-import { claimNextPendingTask, getSupabase, persistTask, updateTask } from "./db.js";
+import { claimNextPendingTask, getSupabase, getTask, persistTask, updateTask } from "./db.js";
+import { IdempotencyStore, getExistingTask } from "./idempotency.js";
 
 export interface TaskSpec {
   repo: string;
@@ -24,6 +25,7 @@ export interface TaskSpec {
   maxCostUsd?: number;
   maxWallClockMinutes?: number;
   metadata?: Record<string, unknown>;
+  idempotencyKey?: string;
 }
 
 export interface TaskQueueOptions {
@@ -32,6 +34,7 @@ export interface TaskQueueOptions {
   onClaim: (task: Task) => Promise<void>;
   onEvent: (taskId: string, type: string, data: unknown) => Promise<void>;
   workerId?: string;
+  idempotencyStore?: IdempotencyStore;
 }
 
 function buildTask(spec: TaskSpec): Task {
@@ -63,6 +66,7 @@ function buildTask(spec: TaskSpec): Task {
     maxCostUsd: spec.maxCostUsd,
     maxWallClockMinutes: spec.maxWallClockMinutes,
     metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+    idempotencyKey: spec.idempotencyKey,
   };
 }
 
@@ -76,6 +80,7 @@ export class TaskQueue {
   private running = new Set<string>();
   private timer: NodeJS.Timeout | undefined;
   private processing = false;
+  private idempotencyStore: IdempotencyStore;
 
   constructor(options: TaskQueueOptions) {
     this.maxConcurrent = Math.max(1, options.maxConcurrent);
@@ -83,10 +88,30 @@ export class TaskQueue {
     this.onClaim = options.onClaim;
     this.onEvent = options.onEvent;
     this.workerId = options.workerId ?? `worker-${randomUUID().slice(0, 8)}`;
+    this.idempotencyStore = options.idempotencyStore ?? new IdempotencyStore();
   }
 
-  async enqueue(spec: TaskSpec): Promise<Task> {
+  async enqueue(spec: TaskSpec, options?: { idempotencyKey?: string }): Promise<Task> {
+    const idempotencyKey = options?.idempotencyKey ?? spec.idempotencyKey;
+
+    if (idempotencyKey) {
+      const existing = await this.idempotencyStore.get(idempotencyKey);
+      if (existing) {
+        const existingTask = await getExistingTask(existing);
+        if (existingTask) return existingTask;
+      }
+    }
+
     const task = buildTask(spec);
+
+    if (idempotencyKey) {
+      const created = await this.idempotencyStore.tryCreate(idempotencyKey, task.id, task);
+      if (!created || created.taskId !== task.id) {
+        const existingTask = created ? await getExistingTask(created) : undefined;
+        return existingTask ?? task;
+      }
+    }
+
     const persisted = await persistTask(task);
     if (!persisted && !getSupabase()) {
       this.pending.push(task);

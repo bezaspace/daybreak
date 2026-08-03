@@ -28,14 +28,14 @@ vi.mock("node:child_process", () => {
   };
 });
 
-async function makeGitHubWebhookPayload(event: string, body: unknown) {
+async function makeGitHubWebhookPayload(event: string, body: unknown, deliveryId?: string) {
   const payload = JSON.stringify(body);
   const signature = `sha256=${createHmac("sha256", "test-secret").update(payload).digest("hex")}`;
   return {
     method: "POST",
     headers: {
       "x-github-event": event,
-      "x-github-delivery": randomUUID(),
+      "x-github-delivery": deliveryId ?? randomUUID(),
       "x-hub-signature-256": signature,
       "content-type": "application/json",
     },
@@ -338,5 +338,57 @@ describe("check_run webhooks", () => {
       const prTasks = allTasks.filter((t) => t.repo === "https://github.com/bezaspace/daybreak-target.git" && t.prBranch === branch && t.triggerSource === "check_run");
       expect(prTasks.length).toBe(2);
     });
+
+    it("deduplicates a check_run heal by check run id", async () => {
+      const branch = "daybreak/check-run-dedup";
+      const body = makeCheckRunBody({ branch, conclusion: "failure", checkRunId: 1234567890 });
+      const res1 = await app.request("/api/webhooks/github", await makeGitHubWebhookPayload("check_run", body));
+      expect(res1.status).toBe(202);
+      const json1 = (await res1.json()) as { taskId?: string };
+      expect(json1.taskId).toBeDefined();
+
+      const res2 = await app.request("/api/webhooks/github", await makeGitHubWebhookPayload("check_run", body));
+      expect(res2.status).toBe(200);
+    });
+  });
+
+  it("deduplicates an issue_comment webhook by X-GitHub-Delivery", async () => {
+    const body = {
+      action: "created",
+      repository: { full_name: "bezaspace/daybreak-target", clone_url: "https://github.com/bezaspace/daybreak-target.git", default_branch: "main" },
+      issue: { title: "Fix bug", body: "There is a bug", number: 1 },
+      comment: { body: "@daybreak-bot please fix this" },
+      sender: { login: "testuser" },
+    };
+    const deliveryId = randomUUID();
+    const res1 = await app.request("/api/webhooks/github", await makeGitHubWebhookPayload("issue_comment", body, deliveryId));
+    expect(res1.status).toBe(202);
+    const json1 = (await res1.json()) as { taskId?: string };
+    expect(json1.taskId).toBeDefined();
+
+    const res2 = await app.request("/api/webhooks/github", await makeGitHubWebhookPayload("issue_comment", body, deliveryId));
+    expect(res2.status).toBe(202);
+    const json2 = (await res2.json()) as { taskId?: string };
+    expect(json2.taskId).toBe(json1.taskId);
+  });
+
+  it("deduplicates POST /api/tasks by Idempotency-Key", async () => {
+    const res1 = await app.request("/api/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "my-key" },
+      body: JSON.stringify({ repo: "https://github.com/bezaspace/daybreak-target.git", branch: "main", prompt: "fix it" }),
+    });
+    expect(res1.status).toBe(202);
+    const json1 = (await res1.json()) as { taskId?: string };
+    expect(json1.taskId).toBeDefined();
+
+    const res2 = await app.request("/api/tasks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Idempotency-Key": "my-key" },
+      body: JSON.stringify({ repo: "https://github.com/bezaspace/daybreak-target.git", branch: "main", prompt: "fix it" }),
+    });
+    expect(res2.status).toBe(202);
+    const json2 = (await res2.json()) as { taskId?: string };
+    expect(json2.taskId).toBe(json1.taskId);
   });
 });

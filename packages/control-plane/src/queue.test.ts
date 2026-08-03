@@ -16,6 +16,10 @@ describe("TaskQueue", () => {
   }
 
   beforeEach(() => {
+    delete process.env.SUPABASE_URL;
+    delete process.env.SUPABASE_SERVICE_KEY;
+    delete process.env.UPSTASH_REDIS_REST_URL;
+    delete process.env.UPSTASH_REDIS_TOKEN;
     claimedTasks = [];
     events = [];
     pendingResolvers = new Map();
@@ -133,5 +137,22 @@ describe("TaskQueue", () => {
     resolver?.();
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(claimedTasks.length).toBe(1);
+  });
+
+  it("returns the existing task when an idempotency key is reused", async () => {
+    const nonBlockingQueue = new TaskQueue({
+      maxConcurrent: 2,
+      pollMs: 10,
+      onClaim: async (task) => {
+        claimedTasks.push(task);
+      },
+      onEvent: async () => {},
+    });
+    const task1 = await nonBlockingQueue.enqueue({ repo: "https://github.com/owner/repo", branch: "main" }, { idempotencyKey: "dup-key" });
+    const task2 = await nonBlockingQueue.enqueue({ repo: "https://github.com/owner/repo", branch: "main" }, { idempotencyKey: "dup-key" });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(task1.id).toBe(task2.id);
+    expect(claimedTasks.length).toBe(1);
+    nonBlockingQueue.stop();
   });
 });
