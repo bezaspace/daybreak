@@ -1,24 +1,9 @@
-import { minimatch } from "minimatch";
 import type { DaybreakConfig } from "./config.js";
+import { isSensitivePath, sanitizePath } from "./security.js";
 
 export interface SafetyCheck {
   allowed: boolean;
   reason?: string;
-}
-
-export function isSensitivePath(path: string, patterns: string[]): boolean {
-  const normalized = path.replace(/\\/g, "/").replace(/^\//, "");
-  for (const pattern of patterns) {
-    const trimmed = pattern.trim();
-    if (!trimmed) continue;
-    if (
-      minimatch(normalized, trimmed, { matchBase: true, dot: true }) ||
-      minimatch(path, trimmed, { matchBase: true, dot: true })
-    ) {
-      return true;
-    }
-  }
-  return false;
 }
 
 export function isProtectedBranch(branch: string, protectedBranches: string[]): boolean {
@@ -76,6 +61,10 @@ export function isGitCommandOnProtectedBranch(args: unknown, protectedBranches: 
 function parseGitBranchArg(command: string): string | undefined {
   const patterns = [
     /git\s+checkout\s+(?:-b\s+)?([^\s&|;]+)/i,
+    /git\s+switch\s+(?:-c\s+)?([^\s&|;]+)/i,
+    /git\s+merge\s+([^\s&|;]+)/i,
+    /git\s+push\s+[^\s]*\s+--delete\s+([^\s&|;]+)/i,
+    /git\s+push\s+[^\s]*\s+:([^\s&|;]+)/i,
     /git\s+push\s+[^\s]*\s+([^\s:&|;]+)/i,
     /git\s+reset\s+[^\s]*\s+([^\s&|;]+)/i,
     /git\s+branch\s+(?:-D\s+|-d\s+)?([^\s&|;]+)/i,
@@ -101,30 +90,47 @@ function extractString(args: unknown, key: string): string | undefined {
   return undefined;
 }
 
-function commandContainsSensitivePath(command: string, patterns: string[]): boolean {
-  // Tokenize a bash command and check any token that looks like a file path.
-  // A token is treated as path-like if it contains a directory separator or a dot,
-  // which avoids false positives on commit messages such as "fix password validation".
-  const tokenize = (input: string): string[] =>
-    input
-      .split(/[\s;|&<>()`"'$\\]+/)
-      .map((t) => t.replace(/^["']+|["']+$/g, ""))
-      .filter((t) => t.length > 0);
+function tokenizeCommand(command: string): string[] {
+  return command
+    .split(/[\s;|&<>()`"'\\$]+/)
+    .map((t) => t.replace(/^["']+|["']+$/g, ""))
+    .filter((t) => t.length > 0);
+}
 
-  for (const token of tokenize(command)) {
-    if (/[\/\\.]/.test(token) && isSensitivePath(token, patterns)) return true;
+function looksLikePath(token: string): boolean {
+  // Commit messages like "fix password validation" have no separators.
+  // Path-like tokens contain a directory separator, a dot, or a leading ~.
+  return /[\/\\.]/.test(token) || token.startsWith("~");
+}
+
+function commandContainsUnsafeToken(command: string, patterns: string[], cwd: string): SafetyCheck {
+  for (const token of tokenizeCommand(command)) {
+    if (!looksLikePath(token)) continue;
+
+    if (isSensitivePath(token, patterns)) {
+      return { allowed: false, reason: `Command references a sensitive path matching the denylist` };
+    }
+
+    const sanitized = sanitizePath(cwd, token);
+    if (!sanitized.ok) {
+      return { allowed: false, reason: `Command references a path outside the workspace: ${sanitized.reason}` };
+    }
   }
-  return false;
+  return { allowed: true };
 }
 
 export class SafetyMiddleware {
   private config: DaybreakConfig;
   private approvedCommands = new Set<string>();
-
+  private cwd?: string;
   private autoApproveAll = false;
 
   constructor(config: DaybreakConfig) {
     this.config = config;
+  }
+
+  setCwd(cwd: string): void {
+    this.cwd = cwd;
   }
 
   approveAll(): void {
@@ -132,13 +138,20 @@ export class SafetyMiddleware {
   }
 
   beforeToolCall(toolName: string, args: unknown): SafetyCheck {
-    const path = this.extractPath(toolName, args);
+    const cwd = this.cwd ?? process.cwd();
+    const path = this.extractPath(args);
 
-    if (path && isSensitivePath(path, this.config.denylistPatterns)) {
-      return {
-        allowed: false,
-        reason: `Path '${path}' matches the sensitive-file denylist`,
-      };
+    if (path) {
+      const sanitized = sanitizePath(cwd, path);
+      if (!sanitized.ok) {
+        return { allowed: false, reason: sanitized.reason };
+      }
+      if (isSensitivePath(sanitized.path, this.config.denylistPatterns)) {
+        return {
+          allowed: false,
+          reason: `Path '${path}' matches the sensitive-file denylist`,
+        };
+      }
     }
 
     if (toolName === "bash") {
@@ -146,12 +159,8 @@ export class SafetyMiddleware {
       if (!destructive.allowed) return destructive;
 
       const command = extractString(args, "command") || "";
-      if (commandContainsSensitivePath(command, this.config.denylistPatterns)) {
-        return {
-          allowed: false,
-          reason: `Command references a sensitive path matching the denylist`,
-        };
-      }
+      const unsafeToken = commandContainsUnsafeToken(command, this.config.denylistPatterns, cwd);
+      if (!unsafeToken.allowed) return unsafeToken;
 
       const protectedBranch = isGitCommandOnProtectedBranch(args, this.config.protectedBranches);
       if (!protectedBranch.allowed) return protectedBranch;
@@ -187,11 +196,8 @@ export class SafetyMiddleware {
     return patterns.some((re) => re.test(command));
   }
 
-  private extractPath(toolName: string, args: unknown): string | undefined {
+  private extractPath(args: unknown): string | undefined {
     const keys = ["path", "file_path", "target_path", "new_path", "old_path"];
-    if (toolName === "bash") {
-      return extractString(args, "command");
-    }
     for (const key of keys) {
       const value = extractString(args, key);
       if (value) return value;

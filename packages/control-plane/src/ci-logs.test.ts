@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { CiLogFetcher, CiLogParser, cleanLogLine, isFailureLine, redactSecrets } from "./ci-logs.js";
+import { redactSecrets } from "@daybreak/shared";
+import { CiLogFetcher, CiLogParser, cleanLogLine, isFailureLine } from "./ci-logs.js";
 
 describe("CiLogFetcher", () => {
   it("fetches and filters failure annotations", async () => {

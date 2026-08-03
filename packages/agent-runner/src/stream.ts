@@ -1,4 +1,5 @@
 import { Redis } from "@upstash/redis";
+import { redactSecrets } from "@daybreak/shared";
 
 export interface StreamEvent {
   id: string;
@@ -63,12 +64,18 @@ export function createStreamPublisher(config: StreamPublisherConfig) {
   return {
     publish: (type: string, data: unknown) => {
       if (closed) return;
+      let safeData = data;
+      try {
+        safeData = JSON.parse(redactSecrets(JSON.stringify(data)));
+      } catch {
+        // If the payload is not JSON-serializable, fall back to the original.
+      }
       buffer.push({
         id: `${taskId}-${++seq}`,
         taskId,
         type,
         timestamp: Date.now(),
-        data,
+        data: safeData,
       });
       schedule();
     },

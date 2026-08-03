@@ -78,6 +78,7 @@ export class TaskRunner {
     const { prompt, cwd, systemPrompt, autoApprove, onStream, onEvent, taskId: explicitTaskId, checkpoint, isFork } = options;
     this.onEvent = onEvent;
     this.startedAt = Date.now();
+    this.safety.setCwd(cwd);
 
     const telemetry = initTelemetry({
       taskId: explicitTaskId,

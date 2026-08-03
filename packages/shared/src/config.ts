@@ -95,6 +95,17 @@ export const DEFAULT_DENYLIST_PATTERNS: string[] = [
   ".npmrc",
   ".pypirc",
   "**/*.tfvars",
+  ".aws/credentials",
+  ".docker/config.json",
+  ".netrc",
+  ".pgpass",
+  ".my.cnf",
+  "id_rsa",
+  "id_ed25519",
+  "*.p8",
+  "*.mobileprovision",
+  ".bash_history",
+  ".zsh_history",
 ];
 
 export function loadConfig(envPath?: string): DaybreakConfig {

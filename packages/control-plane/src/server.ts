@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
-import { loadConfig } from "@daybreak/shared";
+import { loadConfig, redactSecrets } from "@daybreak/shared";
 import { getRedis } from "./redis.js";
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
@@ -94,11 +94,12 @@ function ensureLogDir() {
 
 async function appendLog(taskId: string, chunk: string) {
   ensureLogDir();
-  await appendFile(getLogPath(taskId), chunk).catch(() => {});
+  const safeChunk = redactSecrets(chunk);
+  await appendFile(getLogPath(taskId), safeChunk).catch(() => {});
   try {
     const redis = getRedis();
     const key = `daybreak:logs:${taskId}`;
-    await redis.pipeline().rpush(key, chunk).ltrim(key, -1000, -1).exec();
+    await redis.pipeline().rpush(key, safeChunk).ltrim(key, -1000, -1).exec();
   } catch {
     // Redis logging is best-effort.
   }
@@ -126,7 +127,13 @@ async function publishToRedis(taskId: string, event: StreamEvent) {
 }
 
 async function publishEvent(taskId: string, type: string, data: unknown) {
-  const event: StreamEvent = { id: `${taskId}-pr`, taskId, type, timestamp: Date.now(), data };
+  let safeData = data;
+  try {
+    safeData = JSON.parse(redactSecrets(JSON.stringify(data)));
+  } catch {
+    // Non-JSON payloads are persisted as-is.
+  }
+  const event: StreamEvent = { id: `${taskId}-pr`, taskId, type, timestamp: Date.now(), data: safeData };
   try {
     await persistEvent(taskId, event);
     await publishToRedis(taskId, event);

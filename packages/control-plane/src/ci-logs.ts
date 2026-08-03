@@ -1,3 +1,5 @@
+import { redactSecrets } from "@daybreak/shared";
+
 export interface Annotation {
   path: string;
   start_line: number;
@@ -61,26 +63,6 @@ export function cleanLogLine(line: string): string {
 
 export function isFailureLine(line: string): boolean {
   return FAILURE_PATTERNS.some((pattern) => pattern.test(line));
-}
-
-export function redactSecrets(text: string): string {
-  // URL credentials first: https://user:pass@host
-  let redacted = text.replace(/(https?:\/\/)([^:@\s]+):([^@\s]+)@/g, "$1***:***@");
-
-  // Query-string credentials before the generic key/value regex runs them together.
-  redacted = redacted.replace(/([?&])(token|api[_-]?key|secret|password|credential)s?=[^&\s]+/gi, "$1$2=***");
-
-  // Generic key/value patterns: KEY=..., KEY: ..., KEY="...", etc.
-  // Unquoted values stop at whitespace, quotes, or '&' so URL query params are not merged.
-  redacted = redacted.replace(
-    /(api[_-]?keys?|auth|bearer|passwords?|secrets?|tokens?|credentials?)(\s*[:=]\s*)(?:"[^"\n]{4,}"|'[^'\n]{4,}'|[^\s"'&]{4,})/gi,
-    "$1$2***",
-  );
-
-  // Bearer tokens in headers or elsewhere (preserve the original casing of "Bearer")
-  redacted = redacted.replace(/\b(bearer)\s+[^\s]+/gi, "$1 ***");
-
-  return redacted;
 }
 
 export class CiLogParser {
