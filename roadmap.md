@@ -2,7 +2,7 @@
 
 **Open-source, cloud-native, autonomous AI software engineer platform with time-travel state branching and full OpenTelemetry lineage.**
 
-> **Status:** Phase 5 complete — CI self-healing with `check_run` webhook ingress, failed-job log/annotation fetcher, heal task router, commit-pushing path, circuit breakers, deduplication, dashboard/event-stream UI, eval harness, and updated cost budget.  
+> **Status:** Phase 6 M1-M7 complete; M8-M9 pending. Phase 5 already shipped CI self-healing with `check_run` webhook ingress, failed-job log/annotation fetcher, heal task router, commit-pushing path, circuit breakers, deduplication, dashboard/event-stream UI, eval harness, and updated cost budget.
 > **Started:** 2026-08-01 (planning)  
 > **Document version:** 2.1
 
@@ -43,7 +43,7 @@ Progress is measured by the completion of demoable vertical slices and objective
 | [ ] 3 | GitHub-Native Triggers & Review Loop | GitHub App, issue/PR-comment triggers, scoped 1h tokens, review-loop listener |
 | [ ] 4 | Time-Travel State Branching | Per-turn checkpoints, filesystem + Pi-state rewind, parallel attempt forking |
 | [x] 5 | CI Self-Healing | `check_run` webhook → wake sandbox → fix commit |
-| [ ] 6 | Resilience, Scale & Polish | Task queue, multi-tenancy, idempotency, retry, security audit, branch cleanup |
+| [~] 6 | Resilience, Scale & Polish | M1-M7 shipped (queue, idempotency, retry, tenants, budgets, security, cleanup); M8-M9 pending |
 | [ ] 7 | Cloudflare Deployment & v1.0 | Workers/Pages, Durable Objects/Queues, production webhooks, release docs |
 
 ---
@@ -185,16 +185,16 @@ Progress is measured by the completion of demoable vertical slices and objective
 **Goal:** Make the platform safe, resilient, and multi-user without blowing context windows, quotas, or budgets.
 
 - [ ] 9.1. **Context compaction:** Tune Pi's compaction settings for long tasks and large repositories.
-- [ ] 9.2. **Resource circuit breakers:** Finalize wall-clock (20 min), turn (40), and cost ($0.50) per task with graceful failure and full trace.
-- [ ] 9.3. **Sensitive-file denylist:** Finalize and expand path patterns; add runtime log redaction so LLM/tool outputs cannot leak secrets.
-- [ ] 9.4. **Branch-protection locks:** Agent refuses to commit directly to `main`/`master`; always uses feature branches.
-- [ ] 9.5. **Cost circuit breaker:** Abort task if total $-cost exceeds threshold; emit alert.
-- [ ] 9.6. **Task queue / worker:** Introduce a durable queue (Cloudflare Queues or Redis Streams) so multiple webhooks and UI triggers are processed without data loss or duplication.
-- [ ] 9.7. **Idempotency and deduplication:** Webhook events and tasks carry idempotency keys; duplicate triggers are collapsed.
-- [ ] 9.8. **Retry and dead-letter handling:** Failed tasks retry with exponential backoff; permanently failed tasks land in a dead-letter row in Supabase for manual inspection.
-- [ ] 9.9. **Multi-tenancy and auth:** Per-GitHub-installation isolation, per-user/per-org task quotas, and role-based actions.
-- [ ] 9.10. **Security audit:** Review sandbox escape vectors, LLM injection risks, path traversal in tool paths, and log sanitization.
-- [ ] 9.11. **Branch cleanup:** Delete or archive stale feature branches and terminate idle sandboxes automatically.
+- [x] 9.2. **Resource circuit breakers:** Finalize wall-clock (20 min), turn (40), and cost ($0.50) per task with graceful failure and full trace.
+- [x] 9.3. **Sensitive-file denylist:** Finalize and expand path patterns; add runtime log redaction so LLM/tool outputs cannot leak secrets.
+- [x] 9.4. **Branch-protection locks:** Agent refuses to commit directly to `main`/`master`; always uses feature branches.
+- [x] 9.5. **Cost circuit breaker:** Abort task if total $-cost exceeds threshold; emit alert.
+- [x] 9.6. **Task queue / worker:** Introduce a durable queue (Cloudflare Queues or Redis Streams) so multiple webhooks and UI triggers are processed without data loss or duplication.
+- [x] 9.7. **Idempotency and deduplication:** Webhook events and tasks carry idempotency keys; duplicate triggers are collapsed.
+- [x] 9.8. **Retry and dead-letter handling:** Failed tasks retry with exponential backoff; permanently failed tasks land in a dead-letter row in Supabase for manual inspection.
+- [x] 9.9. **Multi-tenancy and auth:** Per-GitHub-installation isolation, per-user/per-org task quotas, and role-based actions.
+- [x] 9.10. **Security audit:** Review sandbox escape vectors, LLM injection risks, path traversal in tool paths, and log sanitization.
+- [x] 9.11. **Branch cleanup:** Delete or archive stale feature branches and terminate idle sandboxes automatically.
 - [ ] 9.12. **Exit criteria:** Attempt to make the agent read `.env` → blocked. Run a task in a loop that never passes tests → hits the 40-turn cap and stops. Simulate a webhook flood → queue absorbs it without duplicate tasks or quota exhaustion.
 
 ---

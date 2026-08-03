@@ -53,6 +53,32 @@ Copy the tunnel URL (e.g. `https://<random>.trycloudflare.com`) and add it as a 
 - `SUPABASE_SERVICE_KEY` is high-sensitivity and is used by the control plane to persist tasks and events.
 - Langfuse keys (`LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`) are lower risk but still kept out of source control.
 
+## Phase 6 runtime configuration (M1-M7)
+
+These values are not secrets but are documented here because they are tenant- and quota-sensitive:
+
+- `DAYBREAK_MAX_CONCURRENT_TASKS` — default `2`; raise only after measuring E2B and Supabase usage.
+- `DAYBREAK_QUEUE_WORKER_POLL_MS` — default `1000`; controls how often the worker polls Supabase.
+- `DAYBREAK_DEFAULT_TENANT_DAILY_COST_USD` — default `0.50`.
+- `DAYBREAK_DEFAULT_TENANT_TASKS_PER_HOUR` — default `10`.
+- `DAYBREAK_DEFAULT_TENANT_MAX_CONCURRENT` — default `2`.
+- `DAYBREAK_GLOBAL_MAX_CONCURRENT_SANDBOXES` — default `5`; hard ceiling across all tenants.
+- `DAYBREAK_COST_ALERT_THRESHOLD` — default `0.8` (fraction of `MAX_COST_USD`).
+- `DAYBREAK_BRANCH_TTL_DAYS` — default `7`; how long stale `daybreak/` branches are kept.
+- `DAYBREAK_SANDBOX_IDLE_TTL_MINUTES` — default `15`; grace period before an idle or terminal sandbox is killed.
+- `DAYBREAK_DATA_RETENTION_DAYS` — default `30`; old `session_snapshots` and active checkpoints are pruned after this.
+- `DAYBREAK_CLEANUP_ENABLED` — default `true`; set to `false` to disable the background cleanup interval.
+
+### Tenant headers
+
+For local testing and Phase 7 per-installation routing, the control plane accepts:
+
+- `X-Daybreak-Tenant-Id` — override the tenant id for a request.
+- `X-Daybreak-User-Id` — identify the caller within the tenant.
+- `X-Daybreak-Role` — one of `admin`, `operator`, `viewer`. `viewer` cannot create tasks.
+
+If no tenant headers are sent, the control plane creates or reuses a default tenant so existing single-user demos continue to work.
+
 ## Never commit secrets
 
 The repo uses a denylist that blocks the agent from reading files matching sensitive patterns such as `.env`, `*.pem`, `*.key`, `.npmrc`, and paths containing `secret`/`token`/`password`. CI rejects pushes that add unencrypted secret files.

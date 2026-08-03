@@ -22,6 +22,8 @@ In addition, Phase 6 should demonstrate:
 
 ---
 
+> **Status:** M1–M7 complete; M8–M9 still pending.
+
 ## Milestones
 
 ### M1 — Durable task queue and concurrency control
@@ -30,26 +32,26 @@ In addition, Phase 6 should demonstrate:
 
 The current control plane spawns an E2B sandbox synchronously inside the request handler. Under a webhook flood this blocks the HTTP server, loses tasks on restart, and can exhaust E2B/Upstash quotas. A durable queue fixes this without requiring Cloudflare Queues yet.
 
-- [ ] Add `supabase/migrations/2026080601_add_task_queue.sql`:
+- [x] Add `supabase/migrations/2026080601_add_task_queue.sql`:
   - Ensure `tasks.status` includes `"pending"` and `"retry_scheduled"`.
   - Add `worker_id`, `claimed_at`, `started_at` columns to `tasks` for claim tracking.
   - Add a Postgres function `claim_next_pending_task(max_concurrent integer)` that atomically selects the oldest `pending` or due `retry_scheduled` task, sets `status='running'`, increments `claimed_at`, and returns the row using `FOR UPDATE SKIP LOCKED` semantics.
-- [ ] Add `packages/control-plane/src/queue.ts` with a `TaskQueue` class:
+- [x] Add `packages/control-plane/src/queue.ts` with a `TaskQueue` class:
   - `enqueue(spec)` inserts a `pending` task into Supabase.
   - `claimNext()` calls the `claim_next_pending_task` RPC and respects `DAYBREAK_MAX_CONCURRENT_TASKS`.
   - `getStatus()` returns pending/running/completed counts.
-- [ ] Refactor `packages/control-plane/src/server.ts`:
+- [x] Refactor `packages/control-plane/src/server.ts`:
   - `POST /api/tasks`, webhook handlers, review/heal/fork routes call `queue.enqueue(...)` and return `202` with `{ taskId, status: "pending" }`.
   - Extract the existing sandbox-spawning logic into a `processTask(task)` method invoked by the worker.
   - Start a worker loop when the server boots (configurable; can also be run as a separate `pnpm --filter control-plane worker` command).
-- [ ] Add `packages/control-plane/src/queue.test.ts`:
+- [x] Add `packages/control-plane/src/queue.test.ts`:
   - Test that `claim_next_pending_task` is safe under concurrent callers.
   - Test that enqueue + claim sets the correct status and that concurrency limits are respected.
-- [ ] Add config to `packages/shared/src/config.ts` and `.env.example`:
+- [x] Add config to `packages/shared/src/config.ts` and `.env.example`:
   - `DAYBREAK_MAX_CONCURRENT_TASKS` (default `2`)
   - `DAYBREAK_QUEUE_WORKER_POLL_MS` (default `1000`)
   - `DAYBREAK_QUEUE_WORKER_ENABLED` (default `true`)
-- [ ] Update `packages/ui/src/App.tsx`:
+- [x] Update `packages/ui/src/App.tsx`:
   - Add a queue status box: pending count, running count, completed/failed count.
   - Allow cancelling a `pending` task (set status `cancelled`).
 
@@ -67,20 +69,20 @@ The current control plane spawns an E2B sandbox synchronously inside the request
 
 Phase 3 already deduplicates webhooks via `X-GitHub-Delivery` stored in Redis for 24 hours. Phase 6 generalizes this into a durable, cross-cutting idempotency layer that also covers the dashboard, heals, reviews, and forks.
 
-- [ ] Add `supabase/migrations/2026080602_add_idempotency_keys.sql`:
+- [x] Add `supabase/migrations/2026080602_add_idempotency_keys.sql`:
   - `idempotency_keys` table: `key text primary key`, `task_id uuid references tasks(id)`, `created_at timestamptz default now()`.
   - Add `tasks.idempotency_key` column.
-- [ ] Add `packages/control-plane/src/idempotency.ts` with an `IdempotencyStore`:
+- [x] Add `packages/control-plane/src/idempotency.ts` with an `IdempotencyStore`:
   - `tryCreate(key, taskId)` attempts a `SET NX` in Redis with 24-hour TTL and, on success, inserts into `idempotency_keys`.
   - `getTaskId(key)` returns the existing task id from Redis or Supabase.
-- [ ] Update `packages/control-plane/src/server.ts`:
+- [x] Update `packages/control-plane/src/server.ts`:
   - `POST /api/tasks` reads an `Idempotency-Key` header (or generates one from `repo` + `branch` + hash of prompt) and returns the existing task if already seen.
   - Webhook handlers use `X-GitHub-Delivery` as the idempotency key.
   - `runReview` uses a deterministic key like `review:<repo>:<prNumber>:<commentId>`.
   - `runHeal` uses `heal:<repo>:<checkRunId>:<attempt>`.
   - `POST /api/checkpoints/:checkpointId/fork` uses `fork:<checkpointId>:<promptHash>`.
-- [ ] Add `packages/control-plane/src/idempotency.test.ts` with Redis mocked.
-- [ ] Update `packages/control-plane/src/server.test.ts`:
+- [x] Add `packages/control-plane/src/idempotency.test.ts` with Redis mocked.
+- [x] Update `packages/control-plane/src/server.test.ts`:
   - A duplicate `X-GitHub-Delivery` returns `202` with the original task id.
   - A duplicate `Idempotency-Key` on `POST /api/tasks` returns the original task id.
 
@@ -97,10 +99,10 @@ Phase 3 already deduplicates webhooks via `X-GitHub-Delivery` stored in Redis fo
 
 Currently a failed sandbox spawn or a transient network error immediately marks the task `failed`. Phase 6 makes the platform self-healing at the orchestration layer, not just at the CI layer.
 
-- [ ] Add `supabase/migrations/2026080603_add_retries_and_dead_letter.sql`:
+- [x] Add `supabase/migrations/2026080603_add_retries_and_dead_letter.sql`:
   - Add to `tasks`: `retry_count integer default 0`, `max_retries integer default 2`, `next_retry_at timestamptz`, `last_error text`.
   - Add `dead_letter_tasks` table: `id uuid primary key`, `task_id uuid`, `repo text`, `branch text`, `pr_branch text`, `error text`, `retry_count integer`, `created_at timestamptz default now()`, `resolved_at timestamptz`, `resolution text`.
-- [ ] Add `packages/control-plane/src/retry.ts`:
+- [x] Add `packages/control-plane/src/retry.ts`:
   - `RetryClassifier.isRetryable(error, triggerSource, context)` returns true for transient failures:
     - E2B sandbox creation/connection errors
     - Git clone network failures/timeouts
@@ -109,15 +111,15 @@ Currently a failed sandbox spawn or a transient network error immediately marks 
     - Bundle upload failures
   - Returns false for safety blocks, branch-protection blocks, max turns/cost, invalid repo, auth 403, test failures, and heal-attempt caps.
   - `RetryScheduler.nextRetryAt(retryCount)` implements exponential backoff (e.g., 30s, 2m, 5m).
-- [ ] Update `packages/control-plane/src/queue.ts` worker:
+- [x] Update `packages/control-plane/src/queue.ts` worker:
   - After `processTask` exits with failure, call `RetryClassifier`.
   - If retryable and `retry_count < max_retries`, update task to `retry_scheduled` with `next_retry_at`.
   - If not retryable or retries exhausted, insert into `dead_letter_tasks` and emit `dead_letter` event.
-- [ ] Add `packages/control-plane/src/server.ts` endpoints:
+- [x] Add `packages/control-plane/src/server.ts` endpoints:
   - `GET /api/dead-letter` lists dead-letter tasks.
   - `POST /api/dead-letter/:taskId/retry` moves a dead-letter task back to `pending`.
-- [ ] Add `packages/ui/src/DeadLetterView.tsx` and wire it into `App.tsx`.
-- [ ] Add `packages/control-plane/src/retry.test.ts` for classifier cases.
+- [x] Add `packages/ui/src/DeadLetterView.tsx` and wire it into `App.tsx`.
+- [x] Add `packages/control-plane/src/retry.test.ts` for classifier cases.
 
 **Acceptance:**
 - Configure an invalid `E2B_API_KEY`; enqueue a task. The task is retried up to `max_retries` times with increasing backoff, then appears in the dead-letter queue.
@@ -132,23 +134,23 @@ Currently a failed sandbox spawn or a transient network error immediately marks 
 
 Phase 3 introduced a `workspaces` stub with `repo`/`sender`-level rate limits. Phase 6 generalizes this into a `tenants` model that will become the GitHub App `installation` in Phase 7 without a schema rewrite.
 
-- [ ] Add `supabase/migrations/2026080604_add_tenants.sql`:
+- [x] Add `supabase/migrations/2026080604_add_tenants.sql`:
   - `tenants` table: `id uuid primary key`, `type text` (`pat`, `github_installation`), `value text` (owner for PAT, installation id for app), `config jsonb` (rate limits, daily cost budget, max concurrency), `created_at`, `updated_at`.
   - `tenant_memberships` table: `tenant_id`, `user_id text`, `role text` (`admin`, `operator`, `viewer`), `created_at`.
   - Add `tasks.tenant_id` foreign key and a `workspaces.tenant_id` column to migrate existing workspaces.
-- [ ] Add `packages/control-plane/src/tenants.ts` with `TenantService`:
+- [x] Add `packages/control-plane/src/tenants.ts` with `TenantService`:
   - `getOrCreateTenantForRequest(req)` derives tenant from `X-Daybreak-Tenant-Id`, `repository.owner.login`, or `installation.id`.
   - `assertCanCreateTask(tenant, userId, role, costEstimate)` checks rate, budget, concurrency, and role.
   - `recordTaskCost(tenantId, costUsd)` updates daily spend (computed from `tasks` table).
-- [ ] Update `packages/control-plane/src/server.ts`:
+- [x] Update `packages/control-plane/src/server.ts`:
   - `assertCanSpawn` is replaced by `tenant.assertCanCreateTask`.
   - `POST /api/tasks` and webhook handlers attach `tenant_id` to the task spec.
   - `GET /api/tasks` scopes by tenant when `X-Daybreak-Tenant-Id`/`X-Daybreak-Role` is present.
-- [ ] Update `packages/shared/src/config.ts` and `.env.example`:
+- [x] Update `packages/shared/src/config.ts` and `.env.example`:
   - `DAYBREAK_DEFAULT_TENANT_DAILY_COST_USD` (default `0.50`)
   - `DAYBREAK_DEFAULT_TENANT_TASKS_PER_HOUR` (default `10`)
   - `DAYBREAK_DEFAULT_TENANT_MAX_CONCURRENT` (default `2`)
-- [ ] Update `packages/ui/src/App.tsx`:
+- [x] Update `packages/ui/src/App.tsx`:
   - Add tenant selector or headers section for local testing.
   - Show `budget_exceeded` / `rate_limited` events.
 
@@ -168,23 +170,23 @@ Phase 3 introduced a `workspaces` stub with `repo`/`sender`-level rate limits. P
 
 Phase 0/1 already added the `TaskRunner` abort paths. Phase 6 surfaces them as first-class observability events and protects the platform from runaway spend across tenants.
 
-- [ ] Update `packages/agent-runner/src/session.ts`:
+- [x] Update `packages/agent-runner/src/session.ts`:
   - When `abort` is called for `max_turns`, `max_cost_usd`, or `max_wall_clock`, emit a `circuit_breaker_triggered` stream event with `reason`, `limit`, and `current` values.
   - Ensure the root span is ended with `ERROR` status and the trace is flushed.
-- [ ] Add `packages/control-plane/src/budgets.ts`:
+- [x] Add `packages/control-plane/src/budgets.ts`:
   - `getTenantDailySpend(tenantId, since)` aggregates `cost_usd` from `tasks` for the tenant in the last 24h.
   - `getGlobalConcurrentRunning()` counts `status='running'` tasks.
   - `isWithinBudget(tenant, estimatedCost)` checks tenant daily and global limits before claiming a task.
-- [ ] Update `packages/control-plane/src/queue.ts`:
+- [x] Update `packages/control-plane/src/queue.ts`:
   - Before claiming a task, call `budgets.isWithinBudget`. If not, defer the task and emit a `budget_deferred` event.
   - Enforce `DAYBREAK_MAX_CONCURRENT_TASKS` globally as well as per tenant.
-- [ ] Add config to `packages/shared/src/config.ts` and `.env.example`:
+- [x] Add config to `packages/shared/src/config.ts` and `.env.example`:
   - `DAYBREAK_GLOBAL_MAX_CONCURRENT_SANDBOXES` (default `5`)
   - `DAYBREAK_COST_ALERT_THRESHOLD` (default `0.8`, fraction of `MAX_COST_USD` at which to emit `cost_alert`)
-- [ ] Update `packages/ui/src/App.tsx`:
+- [x] Update `packages/ui/src/App.tsx`:
   - Render `circuit_breaker_triggered` and `cost_alert` events in the terminal.
   - Show a cost-alert banner when a task crosses the threshold.
-- [ ] Add `packages/control-plane/src/budgets.test.ts`.
+- [x] Add `packages/control-plane/src/budgets.test.ts`.
 
 **Acceptance:**
 - Run a task with `maxTurns=3` that loops forever. It stops at turn 3, emits `circuit_breaker_triggered: max_turns`, and the trace is visible in Langfuse.
@@ -199,24 +201,24 @@ Phase 0/1 already added the `TaskRunner` abort paths. Phase 6 surfaces them as f
 
 The current `SafetyMiddleware` blocks the known `.env` and secret patterns but does not prevent `read ../.env`, `bash cat /etc/passwd`, or the accidental leakage of a secret into the Redis stream or control-plane logs. Phase 6 closes those gaps.
 
-- [ ] Add `packages/shared/src/security.ts`:
+- [x] Add `packages/shared/src/security.ts`:
   - `sanitizePath(cwd, requestedPath)` resolves an absolute or relative path and rejects any result outside `cwd` or containing `..` escape sequences.
   - `isSensitivePath` already exists; extend it to also reject absolute paths outside `cwd`.
   - `redactSecrets(text)` scans strings for credential patterns (`token=...`, `api_key=...`, `Authorization: Bearer ...`, `-----BEGIN ...-----`, AWS keys, URL credentials) and replaces values with `[REDACTED]`.
-- [ ] Update `packages/shared/src/safety.ts`:
+- [x] Update `packages/shared/src/safety.ts`:
   - In `beforeToolCall`, for `read`/`write`/`edit` tools, call `sanitizePath` on any `path`, `file_path`, `target_path`, `new_path`, `old_path` argument.
   - For `bash`, tokenize the command and reject any token that resolves outside `cwd` (e.g., absolute `/etc/passwd`, `../.env`) and any sensitive path.
   - Extend `isGitCommandOnProtectedBranch` to also catch `git switch`, `git merge`, and refspec deletions like `git push origin :main`.
-- [ ] Expand `DEFAULT_DENYLIST_PATTERNS` in `packages/shared/src/config.ts`:
+- [x] Expand `DEFAULT_DENYLIST_PATTERNS` in `packages/shared/src/config.ts`:
   - Add `.aws/credentials`, `.docker/config.json`, `.netrc`, `.pgpass`, `.my.cnf`, `id_rsa`, `id_ed25519`, `*.p8`, `*.mobileprovision`, `.bash_history`, `.zsh_history`.
-- [ ] Update `packages/agent-runner/src/stream.ts`:
+- [x] Update `packages/agent-runner/src/stream.ts`:
   - Call `redactSecrets` on the event payload before `rpush` to Redis.
-- [ ] Update `packages/control-plane/src/server.ts`:
+- [x] Update `packages/control-plane/src/server.ts`:
   - Call `redactSecrets` in `appendLog` and `publishEvent` before persisting to disk/Supabase.
-- [ ] Update `packages/control-plane/src/ci-logs.ts`:
+- [x] Update `packages/control-plane/src/ci-logs.ts`:
   - Reuse the shared `redactSecrets` function instead of a local implementation.
-- [ ] Add `packages/shared/src/security.test.ts` with path-traversal, secret-redaction, and bash-command test cases.
-- [ ] Add `docs/SECURITY_AUDIT.md` capturing the audit findings and mitigations.
+- [x] Add `packages/shared/src/security.test.ts` with path-traversal, secret-redaction, and bash-command test cases.
+- [x] Add `docs/SECURITY_AUDIT.md` capturing the audit findings and mitigations.
 
 **Acceptance:**
 - Agent calls `read` with `path: "../.env"` → blocked with `Path resolves outside workspace`.
@@ -232,10 +234,10 @@ The current `SafetyMiddleware` blocks the known `.env` and secret patterns but d
 
 Over time the target repos accumulate abandoned Daybreak branches and E2B sandboxes stay alive longer than needed. Phase 6 automates cleanup while respecting active tasks.
 
-- [ ] Add `supabase/migrations/2026080605_add_cleanup.sql`:
+- [x] Add `supabase/migrations/2026080605_add_cleanup.sql`:
   - `cleanup_runs` table: `id uuid primary key`, `type text`, `started_at`, `completed_at`, `details jsonb`, `deleted_count integer`.
   - Add index on `tasks(pr_branch, status, ended_at)`.
-- [ ] Add `packages/control-plane/src/cleanup.ts` with:
+- [x] Add `packages/control-plane/src/cleanup.ts` with:
   - `cleanupBranches(options)`:
     - Query GitHub API for branches matching `DAYBREAK_PR_BRANCH_PREFIX`.
     - For each branch, look up its task. Delete the branch if the task is terminal (`complete`/`failed`/`abandoned`/`promoted`) and `ended_at` is older than `DAYBREAK_BRANCH_TTL_DAYS`, or if there is no associated task.
@@ -247,14 +249,14 @@ Over time the target repos accumulate abandoned Daybreak branches and E2B sandbo
   - `cleanupDataRetention()`:
     - Mark checkpoints older than `DAYBREAK_DATA_RETENTION_DAYS` as `abandoned`.
     - Delete old `session_snapshots` rows to save Supabase storage.
-- [ ] Update `packages/control-plane/src/server.ts`:
+- [x] Update `packages/control-plane/src/server.ts`:
   - Add `POST /api/cleanup?type=branches|sandboxes|all&dryRun=true|false`.
   - Optionally run cleanup on server start and on a `setInterval` in local mode; document that Phase 7 will use Cloudflare scheduled Workers for true cron.
-- [ ] Update `packages/ui/src/App.tsx`:
+- [x] Update `packages/ui/src/App.tsx`:
   - Add a "Cleanup" panel with dry-run and run buttons.
   - Show last cleanup run summary.
-- [ ] Add `packages/control-plane/src/cleanup.test.ts` with mocked GitHub and E2B calls.
-- [ ] Add config to `packages/shared/src/config.ts` and `.env.example`:
+- [x] Add `packages/control-plane/src/cleanup.test.ts` with mocked GitHub and E2B calls.
+- [x] Add config to `packages/shared/src/config.ts` and `.env.example`:
   - `DAYBREAK_BRANCH_TTL_DAYS` (default `7`)
   - `DAYBREAK_SANDBOX_IDLE_TTL_MINUTES` (default `15`)
   - `DAYBREAK_DATA_RETENTION_DAYS` (default `30`)

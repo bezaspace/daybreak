@@ -2,7 +2,7 @@
 
 **A living log of the architectural, product, and sequencing decisions behind the Daybreak roadmap.**
 
-> **Status:** Updated through Phase 5.  
+> **Status:** Updated through Phase 6 M7 (M8-M9 pending).  
 > **Started:** 2026-08-01
 
 ---
@@ -472,6 +472,21 @@
 - `packages/control-plane/src/server.test.ts` covers the webhook handler, log parser, and circuit breakers.
 - `packages/evals/src/ci-self-heal.ts` provides a real end-to-end harness (create a broken PR, wait for CI failure, send webhook, wait for heal) and a fast local integration mode that runs the control-plane `check_run` tests.
 - `docs/COST_BUDGET.md` and `docs/SECRETS.md` are updated to reflect the extra per-heal sandbox/LLM cost and the `actions:read`/`checks:read` PAT requirements.
+
+---
+
+## D40. Cleanup, retention, and idle-sandbox termination (Phase 6 M7)
+
+**Decision:** Stale `daybreak/<uuid>` PR branches, expired E2B sandboxes, and old `session_snapshots`/`checkpoints` are cleaned up automatically by a `CleanupService` in the control plane. The service supports `dryRun`, records every run in a `cleanup_runs` audit table, and can be triggered via `POST /api/cleanup` or a dashboard button. In local mode an optional `setInterval` runs the cleanup loop; Phase 7 will replace this with Cloudflare scheduled Workers.
+
+**Rationale:** Daybreak creates many ephemeral branches and sandboxes. Without cleanup, target repos accumulate stale branches and E2B runtime spend continues after tasks finish. Automated cleanup with TTLs and audit logging keeps the project within free-tier limits and avoids surprising repo owners.
+
+**Consequences:**
+- `DAYBREAK_BRANCH_TTL_DAYS` (default 7), `DAYBREAK_SANDBOX_IDLE_TTL_MINUTES` (default 15), `DAYBREAK_DATA_RETENTION_DAYS` (default 30), and `DAYBREAK_CLEANUP_ENABLED` (default `true`) control cleanup behavior.
+- Branch deletion also removes remote checkpoint tags `daybreak/checkpoint/<taskId>/*` so restored checkpoints cannot outlive their branch.
+- Sandbox cleanup kills any `running` task whose `keep_alive_until` is in the past and any terminal task that still has a `sandbox_id`.
+- Data retention marks old `checkpoints` as `abandoned` and deletes old `session_snapshots` rows, reducing Supabase storage growth.
+- `cleanup_runs` records `type`, `started_at`, `completed_at`, `details`, and `deleted_count` for observability.
 
 ---
 

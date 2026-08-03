@@ -164,3 +164,37 @@ These are intentionally tight. Raise them only after measuring real usage in you
 | GitHub log/annotation fetch | REST API, free under quota | ~$0 | `DAYBREAK_MAX_CI_LOG_BYTES` |
 | Per-check-run dedupe key | Redis key with 24h TTL | ~$0 | n/a |
 | Heal attempt cap | 2 per PR per 24h | prevents runaway cost | `DAYBREAK_MAX_HEAL_ATTEMPTS_PER_PR` |
+
+## Phase 6 cleanup and retention budget impact
+
+### Tenant quotas and task queue (M1-M5)
+
+- The durable Supabase-backed queue lets webhook floods absorb without spawning an unbounded number of sandboxes. `DAYBREAK_MAX_CONCURRENT_TASKS` and `DAYBREAK_GLOBAL_MAX_CONCURRENT_SANDBOXES` cap parallel E2B runtime and prevent quota exhaustion.
+- Tenant rate limits (`DAYBREAK_DEFAULT_TENANT_TASKS_PER_HOUR`) and daily cost budgets (`DAYBREAK_DEFAULT_TENANT_DAILY_COST_USD`) stop runaway spend at the ingress layer. Rejected tasks only add a single `tasks` row and negligible API load.
+- `DAYBREAK_COST_ALERT_THRESHOLD` emits a `cost_alert` when a task crosses 80% of `MAX_COST_USD`, giving a heads-up before the per-task circuit breaker trips.
+
+### Branch cleanup (M7)
+
+- Stale `daybreak/<uuid>` branches are removed after `DAYBREAK_BRANCH_TTL_DAYS` (default 7). This avoids cluttering target repos and prevents old branches from being picked up by CI or security scans.
+- Each branch deletion also deletes remote checkpoint tags `daybreak/checkpoint/<taskId>/*`. Git tags are free to store and delete, but removing them keeps the repo lean.
+
+### Sandbox idle cleanup (M7)
+
+- E2B sandboxes for `running` tasks are killed when `keep_alive_until` expires or when the task reaches a terminal status. At 2 vCPU / 1536 MB RAM, every idle minute avoided saves ~$0.00084 in compute.
+- `DAYBREAK_SANDBOX_IDLE_TTL_MINUTES` (default 15) is the guard window before cleanup forces termination.
+
+### Data retention (M7)
+
+- `session_snapshots` rows older than `DAYBREAK_DATA_RETENTION_DAYS` (default 30) are deleted. A 5–50 KB snapshot per checkpoint becomes negligible when pruned.
+- Old `checkpoints` rows are marked `abandoned` rather than deleted, preserving lineage while stopping active storage growth. The `cleanup_runs` audit table records each run for observability.
+
+### Summary table
+
+| Phase 6 cost driver | Default behavior | Approx. cost | Controlling env |
+|---------------------|----------------|--------------|-----------------|
+| Max concurrent sandboxes | hard cap | prevents runaway E2B spend | `DAYBREAK_MAX_CONCURRENT_TASKS`, `DAYBREAK_GLOBAL_MAX_CONCURRENT_SANDBOXES` |
+| Tenant daily budget | rejects over-budget tasks | $0 for rejected tasks | `DAYBREAK_DEFAULT_TENANT_DAILY_COST_USD` |
+| Stale branch cleanup | deletes branches >7 days old | free (GitHub API) | `DAYBREAK_BRANCH_TTL_DAYS` |
+| Idle sandbox cleanup | kills after keep-alive expires or terminal | ~$0.00084/min saved | `DAYBREAK_SANDBOX_IDLE_TTL_MINUTES` |
+| Old session snapshots | deleted after 30 days | frees Supabase storage | `DAYBREAK_DATA_RETENTION_DAYS` |
+| Cleanup audit log | one row per cleanup run | negligible | `DAYBREAK_CLEANUP_ENABLED` |
