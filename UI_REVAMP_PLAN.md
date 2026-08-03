@@ -5,18 +5,29 @@
 **Component library:** [`@base-ui/react`](https://base-ui.com/react/overview/quick-start) (unstyled, accessible primitives) + **Tailwind CSS** for styling.  
 **Theme:** Dark-only, jet-black heavy (`#050505` / `#0a0a0a` / `#111111`) with subtle gray (`#171717`, `#262626`) surfaces, electric-indigo (`#6366f1`) as the primary accent, and green/red/yellow semantic accents.
 
+## Current state (why this revamp is needed)
+
+I verified the repo locally before writing this plan:
+
+- `pnpm install`, `pnpm lint`, `pnpm typecheck`, and `pnpm --filter ui build` all pass.
+- `pnpm test` has **one failure** in `packages/control-plane/src/server.test.ts` (`skips a third heal attempt` expects `"max heal attempts"` but receives `"heal already in flight"`).
+- The control plane starts on `localhost:8787` and the Vite UI starts on `localhost:5173`.
+- The UI works end-to-end, but several functional bugs and missing interactions make it feel like a prototype:
+  - **Status out of sync:** a completed task opened via `?taskId=...` still shows `Status: running` because the local status state is only updated by SSE events, not from the persisted task object.
+  - **No event replay for completed tasks:** the terminal is empty for old tasks because the app only subscribes to the live SSE stream and never fetches `/api/tasks/:id/events` on mount.
+  - **Task list is inert:** the "Recent tasks" list has no click handler; the only way to open a task is to edit the URL.
+  - **Missing approval UI:** `REQUIRE_APPROVAL_FOR_DESTRUCTIVE=true` exists in the config, but there is no UI surface to approve/reject destructive actions (`git push`, `rm -rf`, PR open, etc.).
+  - **Fragile SSE connection:** `EventSource.onerror` is empty, so a control-plane restart leaves the terminal hanging with no reconnect or error state.
+  - **Missing interactions:** no active-task cancel button, no provider/model picker, no event filters, no search, no responsive layout, no design system, and no dark-theme polish.
+  - **Time Travel empty for traced tasks:** the Trace view rendered for an old task, but the Time Travel view showed `No checkpoints for this task yet.`, suggesting checkpoints are either not persisted for every run or the UI is asking the wrong endpoint.
+
 ---
 
 ## 1. Goals
 
 1. Make the dashboard feel like a professional developer tool rather than a prototype.
-2. Fix the functional UI bugs identified in `ANALYSIS.md`:
-   - Task status out of sync for completed/historical tasks.
-   - Empty terminal for completed tasks (no event replay).
-   - Non-clickable task list.
-   - Missing approval UI for destructive actions.
-   - Fragile SSE connection (no reconnect, no error state).
-3. Implement all UI/UX improvements from the analysis:
+2. Fix the functional UI bugs listed in the current-state section above.
+3. Implement all UI/UX improvements identified during local verification:
    - Live/historical terminal with filters, pause/resume, copy, search.
    - Sidebar layout with persistent navigation.
    - Provider/model selector, presets, and per-task overrides.
@@ -333,6 +344,6 @@ All changes should be additive and must not break existing control-plane tests.
 
 - The UI is a single dark-themed React + Base UI + Tailwind app with a sidebar layout.
 - All views are accessible, responsive, and keyboard-friendly.
-- Functional bugs from `ANALYSIS.md` are fixed.
+- All functional UI bugs described in the current-state section are fixed.
 - `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm --filter ui build` pass.
 - A manual end-to-end run demonstrates: trigger → terminal → trace → time travel → costs without leaving the UI.
