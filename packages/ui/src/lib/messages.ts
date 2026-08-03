@@ -26,6 +26,23 @@ function updateRunningAssistantStatus(
 export function appendEvent(prev: ChatMessage[], event: StreamEvent): ChatMessage[] {
   const timestamp = event.timestamp || Date.now();
 
+  if (event.type === "user_message") {
+    const data = event.data as { messageId?: string; content?: string; role?: string } | undefined;
+    const messageId = data?.messageId || generateId();
+    if (prev.some((m) => m.id === messageId)) return prev;
+    return [
+      ...prev,
+      {
+        id: messageId,
+        role: (data?.role as "user") || "user",
+        type: "text",
+        content: data?.content || "",
+        createdAt: timestamp,
+        status: "complete" as const,
+      },
+    ];
+  }
+
   if (event.type === "message_update") {
     const data = event.data as { kind?: string; delta?: string };
     if (data.kind === "complete" || data.kind === "done") {

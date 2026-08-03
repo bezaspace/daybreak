@@ -20,7 +20,9 @@ import {
   persistEvent,
   getEvents,
   getMessages,
+  persistMessage,
   persistMessages,
+  newMessageId,
   getSupabase,
   listCheckpoints,
   getCheckpoint,
@@ -30,6 +32,7 @@ import {
   resolveDeadLetterTask,
   type Task,
   type StreamEvent,
+  type Message,
 } from "./db.js";
 import { buildMessagesFromEvents, MessageBuilder } from "./messages.js";
 import { CiLogFetcher, CiLogParser, type CheckRunOutput } from "./ci-logs.js";
@@ -1565,6 +1568,45 @@ app.get("/api/tasks/:id/messages", async (c) => {
     messages = built;
   }
   return c.json(messages);
+});
+
+app.post("/api/tasks/:id/messages", async (c) => {
+  const id = c.req.param("id");
+  const task = await getTask(id);
+  if (!task) return c.json({ error: "task not found" }, 404);
+
+  const body = (await c.req.json()) as { content?: unknown; method?: unknown };
+  const content = typeof body?.content === "string" ? body.content.trim() : "";
+  if (!content) return c.json({ error: "content is required" }, 400);
+
+  const method = ["sendUserMessage", "steer", "followUp"].includes(body?.method as string)
+    ? (body.method as "sendUserMessage" | "steer" | "followUp")
+    : "sendUserMessage";
+
+  const existing = await getMessages(id);
+  const sequence = existing.length === 0 ? 1 : Math.max(...existing.map((m) => m.sequence)) + 1;
+  const message: Message = {
+    id: newMessageId(),
+    taskId: id,
+    role: "user",
+    type: "text",
+    content,
+    status: "complete",
+    sequence,
+    createdAt: Date.now(),
+  };
+
+  await persistMessage(message);
+  publishEvent(id, "user_message", { messageId: message.id, content, role: message.role });
+
+  try {
+    const redis = getRedis();
+    await redis.rpush(`daybreak:messages:${id}`, JSON.stringify({ content, method, messageId: message.id }));
+  } catch (error) {
+    console.error(`[control-plane] failed to queue user message for ${id}:`, error);
+  }
+
+  return c.json(message, 202);
 });
 
 app.get("/api/tasks/:id/checkpoints", async (c) => {

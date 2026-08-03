@@ -258,9 +258,30 @@ export function App() {
     loadQueueStatus();
   }
 
+  async function sendFollowUp(taskId: string, content: string) {
+    const method = mode === "interactive" ? "steer" : "followUp";
+    try {
+      const res = await fetch(`/api/tasks/${taskId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...tenantHeaders() },
+        body: JSON.stringify({ content, method }),
+      });
+      if (!res.ok) return;
+      const message = (await res.json()) as ChatMessage;
+      setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]));
+      setComposerPrompt("");
+    } catch {
+      // ignore
+    }
+  }
+
   function handleComposerSubmit() {
-    if (!composerPrompt.trim() || !repo.trim()) return;
-    startTask(repo, branch, composerPrompt);
+    if (!composerPrompt.trim() || (!activeTaskId && !repo.trim())) return;
+    if (activeTaskId && isRunning) {
+      sendFollowUp(activeTaskId, composerPrompt.trim());
+    } else {
+      startTask(repo, branch, composerPrompt);
+    }
   }
 
   function handleNewSession() {
@@ -299,8 +320,9 @@ export function App() {
           prompt={composerPrompt}
           mode={mode}
           isRunning={isRunning}
-          disabled={!!selectedTask}
-          disabledReason="Open a new session to send another request"
+          taskSelected={!!selectedTask}
+          disabled={!!selectedTask && !isRunning}
+          disabledReason={selectedTask ? "Task is not running" : undefined}
           onRepoChange={setRepo}
           onBranchChange={setBranch}
           onPromptChange={setComposerPrompt}

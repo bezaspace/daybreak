@@ -4,6 +4,7 @@ import { execSync } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import pc from "picocolors";
+import { Redis } from "@upstash/redis";
 import { TaskRunner, type TaskEvent } from "./session.js";
 import { createStreamPublisher } from "./stream.js";
 import { CheckpointStore } from "./checkpoint.js";
@@ -79,6 +80,8 @@ function installDependencies(cwd: string) {
 
 function toStreamData(event: TaskEvent): unknown {
   switch (event.type) {
+    case "user_message":
+      return { content: event.content, role: event.role };
     case "message_update":
       return {
         kind: event.assistantMessageEvent.type,
@@ -151,6 +154,66 @@ function toStreamData(event: TaskEvent): unknown {
     default:
       return {};
   }
+}
+
+interface UserMessageQueueItem {
+  content: string;
+  method?: "sendUserMessage" | "steer" | "followUp";
+  deliverAs?: "steer" | "followUp";
+}
+
+function createMessageConsumer(taskId: string, runner: TaskRunner, publisher: ReturnType<typeof createStreamPublisher>) {
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_TOKEN;
+  if (!url || !token) {
+    return { start: () => Promise.resolve(), stop: () => {} };
+  }
+
+  const redis = new Redis({ url, token });
+  const key = `daybreak:messages:${taskId}`;
+  let running = false;
+  let stopped = false;
+
+  async function poll() {
+    while (running && !stopped) {
+      const item = await redis.lpop(key);
+      if (item && typeof item === "string") {
+        try {
+          const parsed = JSON.parse(item) as UserMessageQueueItem;
+          const content = parsed.content;
+          const method = parsed.method || "sendUserMessage";
+          console.log(pc.cyan(`[message] ${method}: ${content.slice(0, 80)}`));
+          if (method === "steer") {
+            await runner.steer(content);
+          } else if (method === "followUp") {
+            await runner.followUp(content);
+          } else if (parsed.deliverAs) {
+            await runner.sendUserMessage(content, { deliverAs: parsed.deliverAs });
+          } else {
+            await runner.sendUserMessage(content, { deliverAs: "followUp" });
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error(pc.red("[message] failed to deliver user message:"), message);
+          publisher.publish("task_failed", { error: `user message delivery failed: ${message}` });
+        }
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+    }
+  }
+
+  return {
+    start: () => {
+      running = true;
+      stopped = false;
+      return poll();
+    },
+    stop: () => {
+      stopped = true;
+      running = false;
+    },
+  };
 }
 
 async function main() {
@@ -259,6 +322,8 @@ async function main() {
   });
 
   const runner = new TaskRunner(config);
+  let consumer: ReturnType<typeof createMessageConsumer> | undefined;
+  let consumerPromise: Promise<void> = Promise.resolve();
 
   try {
     const compactionReserveTokens = process.env.COMPACTION_RESERVE_TOKENS ? Number.parseInt(process.env.COMPACTION_RESERVE_TOKENS, 10) : undefined;
@@ -274,6 +339,10 @@ async function main() {
       isFork: Boolean(forkFromCheckpoint),
       compactionReserveTokens,
       compactionKeepRecentTokens,
+      onSessionReady: () => {
+        consumer = createMessageConsumer(taskId, runner, publisher);
+        consumerPromise = consumer.start();
+      },
       onEvent: (event) => {
         publisher.publish(event.type, toStreamData(event));
         if (event.type === "tool_execution_update" && event.toolName === "browser") {
@@ -343,6 +412,8 @@ async function main() {
     publisher.publish("task_failed", { error: errorMessage, traceId: runner.getTraceId() });
     process.exitCode = 1;
   } finally {
+    consumer?.stop();
+    await consumerPromise;
     await runner.shutdown();
     await publisher.close();
   }

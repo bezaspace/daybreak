@@ -25,7 +25,8 @@ type CircuitBreakerEvent = { type: "circuit_breaker_triggered"; reason: string; 
 type CostAlertEvent = { type: "cost_alert"; threshold: number; limit: number; current: number };
 type FileTooLargeEvent = { type: "file_too_large"; path: string; size?: number; maxBytes: number; maxLines: number; reason: string };
 type CompactionAdvisedEvent = { type: "compaction_advised"; tokens: number; contextWindow: number; reserveTokens: number };
-export type TaskEvent = AgentSessionEvent | ProviderSwitchEvent | FallbackAppliedEvent | CheckpointCreatedEvent | CheckpointRestoredEvent | TaskRewindEvent | BranchForkedEvent | CircuitBreakerEvent | CostAlertEvent | FileTooLargeEvent | CompactionAdvisedEvent;
+type UserMessageEvent = { type: "user_message"; content: string; role: "user" };
+export type TaskEvent = AgentSessionEvent | ProviderSwitchEvent | FallbackAppliedEvent | CheckpointCreatedEvent | CheckpointRestoredEvent | TaskRewindEvent | BranchForkedEvent | CircuitBreakerEvent | CostAlertEvent | FileTooLargeEvent | CompactionAdvisedEvent | UserMessageEvent;
 
 export interface RunOptions {
   prompt: string;
@@ -34,6 +35,7 @@ export interface RunOptions {
   autoApprove?: boolean;
   onStream?: (text: string) => void;
   onEvent?: (event: TaskEvent) => void;
+  onSessionReady?: (session: AgentSession) => void;
   taskId?: string;
   checkpoint?: Checkpoint;
   isFork?: boolean;
@@ -79,7 +81,7 @@ export class TaskRunner {
   }
 
   async run(options: RunOptions): Promise<TaskResult> {
-    const { prompt, cwd, systemPrompt, autoApprove, onStream, onEvent, taskId: explicitTaskId, checkpoint, isFork } = options;
+    const { prompt, cwd, systemPrompt, autoApprove, onStream, onEvent, onSessionReady, taskId: explicitTaskId, checkpoint, isFork } = options;
     this.onEvent = onEvent;
     this.startedAt = Date.now();
     this.safety.setCwd(cwd);
@@ -173,6 +175,7 @@ export class TaskRunner {
     }
 
     this.session = session;
+    onSessionReady?.(session);
 
     if (systemPrompt) {
       this.session.agent.state.systemPrompt = systemPrompt;
@@ -229,6 +232,33 @@ export class TaskRunner {
     await this.flushCheckpoints();
     await closeBrowser();
     await shutdownTelemetry(this.provider);
+  }
+
+  async sendUserMessage(content: string, options?: { deliverAs?: "steer" | "followUp" }): Promise<void> {
+    if (!this.session) {
+      console.warn(pc.yellow("[TaskRunner] sendUserMessage called with no active session"));
+      return;
+    }
+    this.onEvent?.({ type: "user_message", content, role: "user" });
+    await this.session.sendUserMessage(content, options);
+  }
+
+  async steer(content: string): Promise<void> {
+    if (!this.session) {
+      console.warn(pc.yellow("[TaskRunner] steer called with no active session"));
+      return;
+    }
+    this.onEvent?.({ type: "user_message", content, role: "user" });
+    await this.session.steer(content);
+  }
+
+  async followUp(content: string): Promise<void> {
+    if (!this.session) {
+      console.warn(pc.yellow("[TaskRunner] followUp called with no active session"));
+      return;
+    }
+    this.onEvent?.({ type: "user_message", content, role: "user" });
+    await this.session.followUp(content);
   }
 
   private async flushCheckpoints(): Promise<void> {

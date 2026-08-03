@@ -288,12 +288,12 @@ Because this is a scope shift, the existing `UI_REVAMP_PLAN.md` milestones are r
 - [x] UI fetches messages on conversation open and merges SSE updates.
 - [x] Preserve old `/api/tasks/:id/events` for compatibility.
 
-### Phase 3 — User can talk back
+### Phase 3 — User can talk back (done)
 
-- Add `POST /api/tasks/:id/messages`.
-- Extend `TaskRunner` with `sendUserMessage`, `steer`, and `followUp` methods.
-- Pipe user messages into `AgentSession.sendUserMessage`/`steer`/`followUp`.
-- Ensure the SSE stream reflects user messages and assistant responses.
+- [x] Add `POST /api/tasks/:id/messages`.
+- [x] Extend `TaskRunner` with `sendUserMessage`, `steer`, and `followUp` methods.
+- [x] Pipe user messages into `AgentSession.sendUserMessage`/`steer`/`followUp`.
+- [x] Ensure the SSE stream reflects user messages and assistant responses.
 
 ### Phase 4 — Artifact/sandbox panel
 

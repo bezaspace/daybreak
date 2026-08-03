@@ -164,6 +164,25 @@ function updateRunningAssistantStatus(prev: Message[], status: "complete" | "err
 function appendEventToMessages(prev: Message[], event: StreamEvent, taskId: string, nextSequence: number): { messages: Message[]; nextSequence: number } {
   const timestamp = event.timestamp || Date.now();
 
+  if (event.type === "user_message") {
+    const data = event.data as { messageId?: string; content?: string; role?: string } | undefined;
+    const messageId = data?.messageId || randomUUID();
+    if (prev.some((m) => m.id === messageId)) {
+      return { messages: prev, nextSequence };
+    }
+    const message: Message = {
+      id: messageId,
+      taskId,
+      role: (data?.role as "user") || "user",
+      type: "text",
+      content: data?.content || "",
+      status: "complete",
+      createdAt: timestamp,
+      sequence: nextSequence,
+    };
+    return { messages: [...prev, message], nextSequence: nextSequence + 1 };
+  }
+
   if (event.type === "message_update") {
     const data = event.data as { kind?: string; delta?: string };
     if (data.kind === "complete" || data.kind === "done") {
