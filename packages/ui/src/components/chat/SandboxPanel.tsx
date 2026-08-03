@@ -243,7 +243,7 @@ export function SandboxPanel({
     <aside
       className={cn(
         "flex h-full flex-col border-l border-db-border bg-db-surface transition-all duration-200",
-        collapsed ? "w-14 items-center" : "w-96",
+        collapsed ? "w-14 items-center" : "w-full md:w-96",
       )}
     >
       <div

@@ -31,6 +31,8 @@ export interface Task {
   healAttempt?: number;
   prompt?: string;
   metadata?: Record<string, unknown>;
+  archived?: boolean;
+  deletedAt?: number;
 }
 
 export interface ChatMessage {

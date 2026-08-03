@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Wifi, WifiOff, X } from "lucide-react";
+import { cn } from "./lib/utils.js";
 import { ChatLayout } from "./components/chat/ChatLayout.js";
 import { ConversationSidebar } from "./components/chat/ConversationSidebar.js";
 import { ChatHeader } from "./components/chat/ChatHeader.js";
@@ -41,6 +43,16 @@ function updateUrl(view: "chat" | ViewId, taskId: string | null) {
   window.history.replaceState({}, "", qs ? `?${qs}` : window.location.pathname);
 }
 
+function repoName(repo: string): string {
+  try {
+    const url = new URL(repo);
+    const parts = url.pathname.split("/").filter(Boolean);
+    return parts.slice(-2).join("/");
+  } catch {
+    return repo.length > 32 ? `${repo.slice(0, 32)}…` : repo;
+  }
+}
+
 export function App() {
   const [activeView, setActiveView] = useState<"chat" | ViewId>(getInitialView);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(getInitialTaskId);
@@ -63,6 +75,16 @@ export function App() {
   const [mode, setMode] = useState<"plan" | "interactive" | "autopilot">("autopilot");
   const [helpOpen, setHelpOpen] = useState(false);
 
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+  const [streamConnected, setStreamConnected] = useState(false);
+  interface Toast {
+    id: string;
+    message: string;
+    type: "info" | "success" | "error";
+  }
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const previousTasksRef = useRef<Task[]>([]);
+
   const [tenantId, setTenantId] = useState("");
   const [role, setRole] = useState("operator");
   const [userId, setUserId] = useState("");
@@ -75,10 +97,38 @@ export function App() {
     return headers;
   }
 
+  function addToast(message: string, type: Toast["type"] = "info") {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setToasts((prev) => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 5000);
+  }
+
+  function detectToasts(next: Task[], prev: Task[]) {
+    const prevMap = new Map(prev.map((t) => [t.id, t.status]));
+    for (const task of next) {
+      const previousStatus = prevMap.get(task.id);
+      if (previousStatus && previousStatus !== task.status) {
+        const label = `${repoName(task.repo)} @ ${task.branch}`;
+        if (["complete", "promoted"].includes(task.status)) {
+          addToast(`Task complete: ${label}`, "success");
+        } else if (["failed", "abandoned", "cancelled"].includes(task.status)) {
+          addToast(`Task ${task.status}: ${label}`, "error");
+        }
+      }
+    }
+  }
+
   function loadTasks() {
     fetch("/api/tasks", { headers: tenantHeaders() })
       .then((r) => r.json())
-      .then((data) => setTasks(Array.isArray(data) ? data : []))
+      .then((data) => {
+        const next = Array.isArray(data) ? (data as Task[]) : [];
+        detectToasts(next, previousTasksRef.current);
+        previousTasksRef.current = next;
+        setTasks(next);
+      })
       .catch(() => {});
   }
 
@@ -154,6 +204,24 @@ export function App() {
     return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    const online = () => {
+      setIsOnline(true);
+      addToast("Connection restored", "success");
+      loadTasks();
+    };
+    const offline = () => {
+      setIsOnline(false);
+      addToast("You are offline", "error");
+    };
+    window.addEventListener("online", online);
+    window.addEventListener("offline", offline);
+    return () => {
+      window.removeEventListener("online", online);
+      window.removeEventListener("offline", offline);
+    };
+  }, []);
+
   const selectedTask = useMemo(() => tasks.find((t) => t.id === activeTaskId), [tasks, activeTaskId]);
 
   useEffect(() => {
@@ -227,11 +295,13 @@ export function App() {
       }
     };
 
+    es.onopen = () => setStreamConnected(true);
     es.onerror = () => {
-      // EventSource will auto-reconnect
+      setStreamConnected(false);
     };
 
     return () => {
+      setStreamConnected(false);
       es.close();
     };
   }, [activeTaskId]);
@@ -334,6 +404,20 @@ export function App() {
     if (command === "costs") setActiveView("costs");
     if (command === "cancel" && activeTaskId) cancelTask(activeTaskId);
     if (command === "help") setHelpOpen(true);
+  }
+
+  async function handleTaskAction(taskId: string, action: "archive" | "unarchive" | "delete") {
+    try {
+      if (action === "delete") {
+        await fetch(`/api/tasks/${taskId}`, { method: "DELETE" });
+        if (activeTaskId === taskId) handleNewSession();
+      } else {
+        await fetch(`/api/tasks/${taskId}/${action}`, { method: "POST" });
+      }
+      await loadTasks();
+    } catch {
+      // ignore
+    }
   }
 
   function handleNewSession() {
@@ -454,6 +538,7 @@ export function App() {
           onNewSession={handleNewSession}
           onSelectTask={handleSelectTask}
           onNavigate={handleNavigate}
+          onTaskAction={handleTaskAction}
         />
       }
       center={center}
@@ -472,6 +557,44 @@ export function App() {
         ) : undefined
       }
     />
+
+      {!isOnline && (
+        <div className="fixed left-1/2 top-2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border border-db-border bg-db-surface px-3 py-1.5 text-xs font-medium text-db-text shadow-lg">
+          <WifiOff className="h-3.5 w-3.5 text-db-danger" />
+          Offline — changes will queue
+        </div>
+      )}
+      {isOnline && activeTaskId && !streamConnected && (
+        <div className="fixed left-1/2 top-2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border border-db-border bg-db-surface px-3 py-1.5 text-xs font-medium text-db-text shadow-lg">
+          <Wifi className="h-3.5 w-3.5 animate-pulse text-db-warning" />
+          Reconnecting…
+        </div>
+      )}
+
+      {toasts.length > 0 && (
+        <div className="fixed bottom-4 right-4 z-50 flex w-72 flex-col gap-2">
+          {toasts.map((toast) => (
+            <div
+              key={toast.id}
+              className={cn(
+                "flex items-center justify-between rounded-md border px-3 py-2 text-xs font-medium shadow-lg",
+                toast.type === "success" && "border-db-success/20 bg-db-success/10 text-db-success",
+                toast.type === "error" && "border-db-danger/20 bg-db-danger/10 text-db-danger",
+                toast.type === "info" && "border-db-border bg-db-surface text-db-text",
+              )}
+            >
+              <span className="line-clamp-2">{toast.message}</span>
+              <button
+                type="button"
+                onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
+                className="ml-2 rounded p-1 hover:bg-black/10"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </>
   );
 }

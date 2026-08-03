@@ -321,12 +321,12 @@ Because this is a scope shift, the existing `UI_REVAMP_PLAN.md` milestones are r
 - [x] Slash commands: `/plan`, `/auto`, `/interactive`, `/costs`, `/cancel`, `/help`.
 - [x] Image attachments (for UI mockups).
 
-### Phase 7 — Multi-session and mobile polish
+### Phase 7 — Multi-session and mobile polish (done)
 
-- Sidebar groups by repo, status (running, idle, completed, dead-letter).
-- Search, archive, delete conversations.
-- Mobile: bottom sheet for right panel, collapsible sidebar drawer.
-- Offline/reconnect handling, unread indicators, notification toasts.
+- [x] Sidebar groups by repo, status (running, idle, completed, dead-letter).
+- [x] Search, archive, delete conversations.
+- [x] Mobile: bottom sheet for right panel, collapsible sidebar drawer.
+- [x] Offline/reconnect handling, unread indicators, notification toasts.
 
 ### Phase 8 — Performance, tests, and local packaging
 

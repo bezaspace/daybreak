@@ -42,6 +42,8 @@ export interface PersistedTask {
   max_retries?: number | null;
   next_retry_at?: string | null;
   last_error?: string | null;
+  archived?: boolean | null;
+  deleted_at?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -120,6 +122,8 @@ export interface Task {
   maxRetries?: number;
   nextRetryAt?: number;
   lastError?: string;
+  archived?: boolean;
+  deletedAt?: number;
 }
 
 export interface PersistedWorkspace {
@@ -198,6 +202,8 @@ function toTask(row: PersistedTask): Task {
     maxRetries: row.max_retries ?? undefined,
     nextRetryAt: row.next_retry_at ? new Date(row.next_retry_at).getTime() : undefined,
     lastError: row.last_error ?? undefined,
+    archived: row.archived ?? undefined,
+    deletedAt: row.deleted_at ? new Date(row.deleted_at).getTime() : undefined,
   };
 }
 
@@ -240,6 +246,8 @@ export async function persistTask(task: Task): Promise<boolean> {
     max_retries: task.maxRetries ?? 2,
     next_retry_at: task.nextRetryAt ? new Date(task.nextRetryAt).toISOString() : null,
     last_error: task.lastError ?? null,
+    archived: task.archived ?? false,
+    deleted_at: task.deletedAt ? new Date(task.deletedAt).toISOString() : null,
     updated_at: new Date().toISOString(),
   });
   if (error) {
@@ -277,6 +285,8 @@ export async function updateTask(id: string, updates: Partial<Task>): Promise<bo
   if (updates.maxRetries !== undefined) payload.max_retries = updates.maxRetries ?? 2;
   if (updates.nextRetryAt !== undefined) payload.next_retry_at = updates.nextRetryAt ? new Date(updates.nextRetryAt).toISOString() : null;
   if (updates.lastError !== undefined) payload.last_error = updates.lastError ?? null;
+  if (updates.archived !== undefined) payload.archived = updates.archived;
+  if (updates.deletedAt !== undefined) payload.deleted_at = updates.deletedAt ? new Date(updates.deletedAt).toISOString() : null;
   const { error } = await supabase.from("tasks").update(payload).eq("id", id);
   if (error) {
     console.error("[db] updateTask error:", error.message);
@@ -285,14 +295,20 @@ export async function updateTask(id: string, updates: Partial<Task>): Promise<bo
   return true;
 }
 
-export async function getTasks(): Promise<Task[]> {
+export async function getTasks(options?: { includeArchived?: boolean; includeDeleted?: boolean }): Promise<Task[]> {
   const supabase = getSupabase();
   if (!supabase) return [];
-  const { data, error } = await supabase
+  let query = supabase
     .from("tasks")
     .select("*")
-    .order("created_at", { ascending: false })
-    .returns<PersistedTask[]>();
+    .order("created_at", { ascending: false });
+  if (!options?.includeDeleted) {
+    query = query.is("deleted_at", null);
+  }
+  if (!options?.includeArchived) {
+    query = query.eq("archived", false);
+  }
+  const { data, error } = await query.returns<PersistedTask[]>();
   if (error) {
     console.error("[db] getTasks error:", error.message);
     return [];

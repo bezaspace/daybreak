@@ -12,6 +12,12 @@ import {
   XCircle,
   Trash2,
   Search,
+  Archive,
+  ArchiveRestore,
+  CalendarDays,
+  FolderGit,
+  LayoutList,
+  MoreVertical,
 } from "lucide-react";
 import { cn } from "../../lib/utils.js";
 import { Button } from "../base/Button.js";
@@ -28,6 +34,7 @@ interface ConversationSidebarProps {
   onNewSession: () => void;
   onSelectTask: (taskId: string) => void;
   onNavigate: (view: "chat" | ViewId) => void;
+  onTaskAction?: (taskId: string, action: "archive" | "unarchive" | "delete") => void;
 }
 
 type LucideIcon = React.ComponentType<{ className?: string }>;
@@ -71,6 +78,20 @@ function dateGroupLabel(startedAt: number | undefined): string {
   return "Older";
 }
 
+function statusGroup(status: string): "running" | "idle" | "completed" | "dead-letter" {
+  if (["running", "starting"].includes(status)) return "running";
+  if (["pending", "paused", "waiting", "idle"].includes(status)) return "idle";
+  if (["complete", "promoted", "success"].includes(status)) return "completed";
+  return "dead-letter";
+}
+
+type GroupBy = "date" | "repo" | "status";
+
+interface TaskGroup {
+  label: string;
+  tasks: Task[];
+}
+
 export function ConversationSidebar({
   tasks,
   activeTaskId,
@@ -78,36 +99,69 @@ export function ConversationSidebar({
   onNewSession,
   onSelectTask,
   onNavigate,
+  onTaskAction,
 }: ConversationSidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [search, setSearch] = useState("");
+  const [groupBy, setGroupBy] = useState<GroupBy>("status");
+  const [showArchived, setShowArchived] = useState(false);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   const filteredTasks = useMemo(() => {
     const term = search.trim().toLowerCase();
-    const sorted = [...tasks].sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
-    if (!term) return sorted;
-    return sorted.filter(
+    let visible = tasks.filter((t) => showArchived || !t.archived).filter((t) => !t.deletedAt);
+    visible.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
+    if (!term) return visible;
+    return visible.filter(
       (t) =>
         t.repo.toLowerCase().includes(term) ||
         t.branch.toLowerCase().includes(term) ||
         t.status.toLowerCase().includes(term) ||
-        (t.prompt && t.prompt.toLowerCase().includes(term)),
+        (t.prompt && t.prompt.toLowerCase().includes(term)) ||
+        (t.id && t.id.toLowerCase().includes(term)),
     );
-  }, [tasks, search]);
+  }, [tasks, search, showArchived]);
 
-  const grouped = useMemo(() => {
+  const grouped = useMemo<TaskGroup[]>(() => {
+    if (groupBy === "date") {
+      const map = new Map<string, Task[]>();
+      for (const task of filteredTasks) {
+        const label = dateGroupLabel(task.startedAt);
+        const list = map.get(label) || [];
+        list.push(task);
+        map.set(label, list);
+      }
+      const order = ["Today", "Yesterday", "Older"];
+      return order.map((label) => ({ label, tasks: map.get(label) || [] })).filter((g) => g.tasks.length > 0);
+    }
+
+    if (groupBy === "repo") {
+      const map = new Map<string, Task[]>();
+      for (const task of filteredTasks) {
+        const label = repoName(task.repo);
+        const list = map.get(label) || [];
+        list.push(task);
+        map.set(label, list);
+      }
+      return Array.from(map.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([label, tasks]) => ({ label, tasks }));
+    }
+
+    const order: Record<string, number> = { running: 0, idle: 1, completed: 2, "dead-letter": 3 };
     const map = new Map<string, Task[]>();
     for (const task of filteredTasks) {
-      const label = dateGroupLabel(task.startedAt);
+      const label = statusGroup(task.status);
       const list = map.get(label) || [];
       list.push(task);
       map.set(label, list);
     }
-    const order = ["Today", "Yesterday", "Older"];
-    return order
-      .map((label) => ({ label, tasks: map.get(label) || [] }))
-      .filter((g) => g.tasks.length > 0);
-  }, [filteredTasks]);
+    return Array.from(map.entries())
+      .sort(([a], [b]) => (order[a] ?? 99) - (order[b] ?? 99))
+      .map(([label, tasks]) => ({ label: label.replace("-", " "), tasks }));
+  }, [filteredTasks, groupBy]);
+
+  const runningCount = useMemo(() => tasks.filter((t) => ["running", "starting"].includes(t.status) && !t.deletedAt).length, [tasks]);
 
   return (
     <aside
@@ -160,12 +214,17 @@ export function ConversationSidebar({
           )}
         >
           <MessageSquare className="h-4 w-4 shrink-0" />
-          {!collapsed && "Chat"}
+          {!collapsed && (
+            <span className="flex flex-1 items-center justify-between">
+              Chat
+              {runningCount > 0 && <span className="h-2 w-2 rounded-full bg-db-warning" />}
+            </span>
+          )}
         </button>
       </nav>
 
       {!collapsed && (
-        <div className="px-3 pb-2">
+        <div className="space-y-2 px-3 pb-2">
           <div className="relative">
             <Search className="absolute left-2.5 top-2 h-4 w-4 text-db-text-tertiary" />
             <Input
@@ -174,6 +233,44 @@ export function ConversationSidebar({
               placeholder="Search sessions…"
               className="pl-8"
             />
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex flex-1 items-center rounded-md border border-db-border bg-db-elevated p-0.5">
+              {([
+                { id: "status", icon: LayoutList, label: "Status" },
+                { id: "repo", icon: FolderGit, label: "Repo" },
+                { id: "date", icon: CalendarDays, label: "Date" },
+              ] as { id: GroupBy; icon: LucideIcon; label: string }[]).map((opt) => {
+                const Icon = opt.icon;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setGroupBy(opt.id)}
+                    title={opt.label}
+                    className={cn(
+                      "flex flex-1 items-center justify-center rounded py-1 text-xs font-medium transition-colors",
+                      groupBy === opt.id ? "bg-db-accent/10 text-db-accent" : "text-db-text-secondary hover:text-db-text",
+                    )}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowArchived((s) => !s)}
+              title={showArchived ? "Hide archived" : "Show archived"}
+              className={cn(
+                "rounded border px-2 py-1 text-xs font-medium transition-colors",
+                showArchived
+                  ? "border-db-accent/20 bg-db-accent/10 text-db-accent"
+                  : "border-db-border bg-db-elevated text-db-text-secondary hover:text-db-text",
+              )}
+            >
+              <Archive className="h-3.5 w-3.5" />
+            </button>
           </div>
         </div>
       )}
@@ -195,29 +292,89 @@ export function ConversationSidebar({
                 <div className="space-y-1">
                   {group.tasks.map((task) => {
                     const active = activeTaskId === task.id && activeView === "chat";
+                    const isRunning = ["running", "starting"].includes(task.status);
                     return (
-                      <button
+                      <div
                         key={task.id}
-                        type="button"
-                        onClick={() => onSelectTask(task.id)}
                         className={cn(
-                          "w-full rounded-md border px-2 py-2 text-left transition-colors",
+                          "group relative w-full rounded-md border px-2 py-2 text-left transition-colors",
                           active
                             ? "border-db-accent/20 bg-db-accent/10"
                             : "border-transparent hover:bg-db-subtle",
                         )}
                       >
-                        <div className="flex items-center gap-2">
-                          <Badge variant={statusBadgeVariant(task.status)} className="shrink-0 text-[10px]">
-                            {task.status}
-                          </Badge>
-                          <span className="truncate text-sm text-db-text">{repoName(task.repo)}</span>
-                          <span className="shrink-0 text-xs text-db-text-tertiary">@{task.branch}</span>
-                        </div>
-                        {task.prompt && (
-                          <div className="mt-1 truncate pl-1 text-xs text-db-text-secondary">{task.prompt}</div>
+                        <button
+                          type="button"
+                          onClick={() => onSelectTask(task.id)}
+                          className="w-full text-left"
+                        >
+                          <div className="flex items-center gap-2">
+                            <Badge variant={statusBadgeVariant(task.status)} className="shrink-0 text-[10px]">
+                              {task.status}
+                            </Badge>
+                            <span className="truncate text-sm text-db-text">{repoName(task.repo)}</span>
+                            <span className="shrink-0 text-xs text-db-text-tertiary">@{task.branch}</span>
+                            {isRunning && <span className="ml-auto h-2 w-2 shrink-0 animate-pulse rounded-full bg-db-warning" />}
+                            {task.archived && <Archive className="ml-auto h-3 w-3 shrink-0 text-db-text-tertiary" />}
+                          </div>
+                          {task.prompt && (
+                            <div className="mt-1 truncate pl-1 text-xs text-db-text-secondary">{task.prompt}</div>
+                          )}
+                        </button>
+
+                        {onTaskAction && (
+                          <div className="absolute right-1 top-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100">
+                            <button
+                              type="button"
+                              onClick={() => setOpenMenuId(openMenuId === task.id ? null : task.id)}
+                              className="rounded p-1 text-db-text-secondary hover:bg-db-elevated hover:text-db-text"
+                              aria-label="Task actions"
+                            >
+                              <MoreVertical className="h-3.5 w-3.5" />
+                            </button>
+                            {openMenuId === task.id && (
+                              <div className="absolute right-0 top-full z-10 w-32 rounded-md border border-db-border bg-db-surface shadow-lg">
+                                {task.archived ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      onTaskAction(task.id, "unarchive");
+                                      setOpenMenuId(null);
+                                    }}
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-db-text hover:bg-db-elevated"
+                                  >
+                                    <ArchiveRestore className="h-3.5 w-3.5" />
+                                    Unarchive
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      onTaskAction(task.id, "archive");
+                                      setOpenMenuId(null);
+                                    }}
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-db-text hover:bg-db-elevated"
+                                  >
+                                    <Archive className="h-3.5 w-3.5" />
+                                    Archive
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    onTaskAction(task.id, "delete");
+                                    setOpenMenuId(null);
+                                  }}
+                                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-db-danger hover:bg-db-danger/10"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                  Delete
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         )}
-                      </button>
+                      </div>
                     );
                   })}
                 </div>

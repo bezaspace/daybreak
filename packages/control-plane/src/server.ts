@@ -1151,7 +1151,9 @@ app.get("/api/repos/:owner/:repo/issues-prs", async (c) => {
 });
 
 app.get("/api/tasks", async (c) => {
-  const dbTasks = await getTasks();
+  const includeArchived = c.req.query("archived") === "true";
+  const includeDeleted = c.req.query("deleted") === "true";
+  const dbTasks = await getTasks({ includeArchived, includeDeleted });
   const merged = new Map<string, Task>();
   for (const task of dbTasks) {
     merged.set(task.id, task);
@@ -1159,7 +1161,9 @@ app.get("/api/tasks", async (c) => {
   for (const task of tasks.values()) {
     merged.set(task.id, task);
   }
-  let all = Array.from(merged.values());
+  let all = Array.from(merged.values()).filter((t) =>
+    (includeDeleted || !t.deletedAt) && (includeArchived || !t.archived),
+  );
 
   const tenantId = c.req.header("x-daybreak-tenant-id");
   if (tenantId) {
@@ -1602,6 +1606,27 @@ app.get("/api/tasks/:id", async (c) => {
   const task = db ?? tasks.get(id);
   if (!task) return c.json({ error: "task not found" }, 404);
   return c.json(task);
+});
+
+app.post("/api/tasks/:id/archive", async (c) => {
+  const id = c.req.param("id");
+  const ok = await updateTask(id, { archived: true });
+  if (!ok) return c.json({ error: "failed to archive task" }, 503);
+  return c.json({ ok: true });
+});
+
+app.post("/api/tasks/:id/unarchive", async (c) => {
+  const id = c.req.param("id");
+  const ok = await updateTask(id, { archived: false });
+  if (!ok) return c.json({ error: "failed to unarchive task" }, 503);
+  return c.json({ ok: true });
+});
+
+app.delete("/api/tasks/:id", async (c) => {
+  const id = c.req.param("id");
+  const ok = await updateTask(id, { deletedAt: Date.now() });
+  if (!ok) return c.json({ error: "failed to delete task" }, 503);
+  return c.json({ ok: true });
 });
 
 app.get("/api/tasks/:id/events", async (c) => {
