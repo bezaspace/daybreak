@@ -3,9 +3,12 @@ import { Bot, User, Wrench, AlertTriangle, Image, CheckCircle, Info } from "luci
 import { cn } from "../../lib/utils.js";
 import { formatCost } from "../../lib/format.js";
 import type { ChatMessage } from "../../lib/types.js";
+import { ApprovalGate } from "./ApprovalGate.js";
 
 interface MessageBubbleProps {
   message: ChatMessage;
+  taskId?: string;
+  onApprovalAction?: (action: "approved" | "rejected" | "approveAlways", toolCallId: string) => void;
 }
 
 function SystemStatus({ content }: { content: unknown }) {
@@ -126,7 +129,7 @@ function ToolResult({ content }: { content: unknown }) {
   );
 }
 
-export function MessageBubble({ message }: MessageBubbleProps) {
+export function MessageBubble({ message, taskId, onApprovalAction }: MessageBubbleProps) {
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
@@ -185,6 +188,28 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           <div className="min-w-0 flex-1">
             <ToolResult content={message.content} />
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (message.type === "approval_request") {
+    const c = message.content as { toolCallId?: string; toolName?: string; reason?: string; kind?: string; decision?: string };
+    return (
+      <div className="flex justify-start">
+        <div className="flex max-w-[90%] items-start gap-2">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-db-elevated">
+            <Info className="h-3.5 w-3.5 text-db-text-secondary" />
+          </div>
+          <ApprovalGate
+            taskId={taskId}
+            toolCallId={c.toolCallId}
+            toolName={c.toolName}
+            reason={c.reason}
+            kind={c.kind}
+            decision={c.decision || null}
+            onAction={onApprovalAction}
+          />
         </div>
       </div>
     );

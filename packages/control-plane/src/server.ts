@@ -153,10 +153,10 @@ async function publishEvent(taskId: string, type: string, data: unknown) {
 const tasks = new Map<string, Task>();
 const rewindingTasks = new Set<string>();
 
-function taskFrom(body: { repo: string; branch: string; id?: string; prBranch?: string; triggerSource?: string; githubSender?: string; prNumber?: number; prompt?: string; status?: Task["status"]; workspaceId?: string; tenantId?: string; parentTaskId?: string; parentCheckpointId?: string; headSha?: string; checkRunId?: string; healAttempt?: number }): Task {
+function taskFrom(body: { repo: string; branch: string; id?: string; prBranch?: string; triggerSource?: string; githubSender?: string; prNumber?: number; prompt?: string; status?: Task["status"]; workspaceId?: string; tenantId?: string; parentTaskId?: string; parentCheckpointId?: string; headSha?: string; checkRunId?: string; healAttempt?: number; metadata?: Task["metadata"] }): Task {
   const id = body.id ?? randomUUID();
   const prBranch = body.prBranch ?? `daybreak/${id}`;
-  return { id, repo: body.repo, branch: body.branch, prBranch, status: body.status ?? "running", startedAt: Date.now(), triggerSource: body.triggerSource, githubSender: body.githubSender, prNumber: body.prNumber, prompt: body.prompt, workspaceId: body.workspaceId, tenantId: body.tenantId, parentTaskId: body.parentTaskId, parentCheckpointId: body.parentCheckpointId, headSha: body.headSha, checkRunId: body.checkRunId, healAttempt: body.healAttempt };
+  return { id, repo: body.repo, branch: body.branch, prBranch, status: body.status ?? "running", startedAt: Date.now(), triggerSource: body.triggerSource, githubSender: body.githubSender, prNumber: body.prNumber, prompt: body.prompt, workspaceId: body.workspaceId, tenantId: body.tenantId, parentTaskId: body.parentTaskId, parentCheckpointId: body.parentCheckpointId, headSha: body.headSha, checkRunId: body.checkRunId, healAttempt: body.healAttempt, metadata: body.metadata };
 }
 
 async function syncEventsFromRedis(taskId: string) {
@@ -334,11 +334,14 @@ async function executeSpawn(task: Task): Promise<void> {
   const taskMaxCostUsd = task.maxCostUsd ?? config.maxCostUsd;
   const taskMaxWallClockMinutes = task.maxWallClockMinutes ?? config.maxWallClockMinutes;
 
+  const mode = typeof task.metadata?.mode === "string" ? task.metadata.mode : undefined;
   const env: NodeJS.ProcessEnv = {
     ...buildSpawnEnv(task.id, task.prBranch, task.repo, task.branch),
     MAX_TURNS: String(taskMaxTurns),
     MAX_WALL_CLOCK_MINUTES: String(taskMaxWallClockMinutes),
     MAX_COST_USD: String(taskMaxCostUsd),
+    AUTO_APPROVE: mode === "autopilot" ? "true" : (mode ? "false" : "true"),
+    PLAN_MODE: mode === "plan" ? "true" : "false",
   };
   if (task.compactionReserveTokens !== undefined) env.COMPACTION_RESERVE_TOKENS = String(task.compactionReserveTokens);
   if (task.compactionKeepRecentTokens !== undefined) env.COMPACTION_KEEP_RECENT_TOKENS = String(task.compactionKeepRecentTokens);
@@ -397,6 +400,7 @@ async function spawnRewind(parent: Task, sandboxId: string, checkpointId: string
   await updateTask(parent.id, { status: "running", endedAt: undefined });
   await publishEvent(parent.id, "task_rewind", { checkpointId, prompt });
 
+  const parentMode = typeof parent.metadata?.mode === "string" ? parent.metadata.mode : undefined;
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     E2B_TEMPLATE: config.e2bTemplate || "base",
@@ -418,6 +422,8 @@ async function spawnRewind(parent: Task, sandboxId: string, checkpointId: string
     DAYBREAK_MAX_REPO_CLONE_DEPTH: String(config.maxRepoCloneDepth),
     DAYBREAK_PROVIDER_FAILURE_THRESHOLD: String(config.providerFailureThreshold),
     TASK_PROMPT: prompt,
+    AUTO_APPROVE: parentMode === "autopilot" ? "true" : (parentMode ? "false" : "true"),
+    PLAN_MODE: parentMode === "plan" ? "true" : "false",
   };
 
   const sandboxArgs = [
@@ -517,6 +523,7 @@ async function spawnFork(
   }
 
   const prBranch = `daybreak/fork-${randomUUID()}`;
+  const childMode = typeof parent.metadata?.mode === "string" ? parent.metadata.mode : undefined;
   const child = taskFrom({
     repo: parent.repo,
     branch: parent.branch,
@@ -527,6 +534,7 @@ async function spawnFork(
     parentCheckpointId: checkpoint.id,
     triggerSource: "fork",
     tenantId: parent.tenantId,
+    metadata: parent.metadata,
   });
   tasks.set(child.id, child);
   if (child.tenantId) {
@@ -585,6 +593,8 @@ async function spawnFork(
     DAYBREAK_PROVIDER_FAILURE_THRESHOLD: String(config.providerFailureThreshold),
     TASK_PROMPT: prompt,
     FORK_SOURCE_BRANCH: parent.prBranch,
+    AUTO_APPROVE: childMode === "autopilot" ? "true" : (childMode ? "false" : "true"),
+    PLAN_MODE: childMode === "plan" ? "true" : "false",
   };
 
   const sandboxArgs = [
@@ -1202,15 +1212,17 @@ app.post("/api/tasks", async (c) => {
     repo?: string;
     branch?: string;
     prompt?: string;
+    mode?: string;
     maxTurns?: number;
     maxCostUsd?: number;
     maxWallClockMinutes?: number;
     compactionReserveTokens?: number;
     compactionKeepRecentTokens?: number;
-  }>().catch(() => ({}) as { repo?: string; branch?: string; prompt?: string; maxTurns?: number; maxCostUsd?: number; maxWallClockMinutes?: number; compactionReserveTokens?: number; compactionKeepRecentTokens?: number });
+  }>().catch(() => ({}) as { repo?: string; branch?: string; prompt?: string; mode?: string; maxTurns?: number; maxCostUsd?: number; maxWallClockMinutes?: number; compactionReserveTokens?: number; compactionKeepRecentTokens?: number });
   const repo = body.repo;
   const branch = body.branch || "main";
   const prompt = body.prompt;
+  const mode = body.mode;
 
   if (!repo) {
     return c.json({ error: "repo is required" }, 400);
@@ -1236,6 +1248,7 @@ app.post("/api/tasks", async (c) => {
         compactionReserveTokens: body.compactionReserveTokens,
         compactionKeepRecentTokens: body.compactionKeepRecentTokens,
         tenantId: tenant.id,
+        metadata: mode ? { mode } : undefined,
       },
       { idempotencyKey },
     );
@@ -1607,6 +1620,30 @@ app.post("/api/tasks/:id/messages", async (c) => {
   }
 
   return c.json(message, 202);
+});
+
+app.post("/api/tasks/:id/approve", async (c) => {
+  const id = c.req.param("id");
+  const body = (await c.req.json().catch(() => ({}))) as { toolCallId?: unknown; action?: unknown };
+  const toolCallId = typeof body.toolCallId === "string" ? body.toolCallId : "";
+  const action = typeof body.action === "string" ? body.action : "";
+  if (!toolCallId || !["approved", "rejected", "approveAlways"].includes(action)) {
+    return c.json({ error: "toolCallId and action (approved/rejected/approveAlways) are required" }, 400);
+  }
+
+  try {
+    const redis = getRedis();
+    const key = `daybreak:approvals:${id}:${toolCallId}`;
+    await redis.set(key, JSON.stringify({ action, timestamp: Date.now() }));
+    if (action === "approveAlways") {
+      await redis.set(`daybreak:approvals:${id}:__all__`, "true");
+    }
+    return c.json({ ok: true, toolCallId, action });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[control-plane] approval failed for ${id}:`, error);
+    return c.json({ error: message }, 503);
+  }
 });
 
 app.get("/api/tasks/:id/checkpoints", async (c) => {

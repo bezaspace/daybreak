@@ -22,9 +22,15 @@ const forkFromCheckpoint = process.env.FORK_FROM_CHECKPOINT;
 const parentTaskId = process.env.PARENT_TASK_ID || taskId;
 const prBranch = process.env.PR_BRANCH_NAME || `daybreak/${taskId}`;
 const autoApprove = process.env.AUTO_APPROVE !== "false";
+const planMode = process.env.PLAN_MODE === "true";
 const pushAfterFix = process.env.PUSH_AFTER_FIX !== "false";
 const isHeal = process.env.HEAL_MODE === "true";
 const gitAskpassPath = process.env.GIT_ASKPASS || `${workDir}/.git-askpass.sh`;
+
+const approvalRedis =
+  process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_TOKEN
+    ? new Redis({ url: process.env.UPSTASH_REDIS_REST_URL, token: process.env.UPSTASH_REDIS_TOKEN })
+    : undefined;
 
 function getDefaultPrompt(): string {
   const pushInstructions = pushAfterFix
@@ -151,6 +157,10 @@ function toStreamData(event: TaskEvent): unknown {
       return { checkpointId: event.checkpointId, prompt: event.prompt };
     case "branch_forked":
       return { checkpointId: event.checkpointId, prompt: event.prompt, parentTaskId: event.parentTaskId };
+    case "approval_request":
+      return { toolCallId: event.toolCallId, toolName: event.toolName, args: event.args, reason: event.reason, kind: event.kind };
+    case "approval_resolved":
+      return { toolCallId: event.toolCallId, decision: event.decision };
     default:
       return {};
   }
@@ -334,6 +344,8 @@ async function main() {
       cwd: targetDir,
       systemPrompt,
       autoApprove,
+      planMode,
+      approvalRedis,
       taskId,
       checkpoint,
       isFork: Boolean(forkFromCheckpoint),

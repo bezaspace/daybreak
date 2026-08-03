@@ -137,6 +137,14 @@ function formatEvent(event: StreamEvent): string {
     const data = event.data as { prUrl?: string; prNumber?: number; prBranch?: string };
     return `[${time}] pr_created: #${data.prNumber ?? "-"} ${data.prBranch || "-"} → ${data.prUrl || "-"}`;
   }
+  if (event.type === "approval_request") {
+    const data = event.data as { kind?: string; toolName?: string; reason?: string };
+    return `[${time}] approval_request: ${data.kind || "tool"} ${data.toolName || ""} - ${data.reason || ""}`;
+  }
+  if (event.type === "approval_resolved") {
+    const data = event.data as { toolCallId?: string; decision?: string };
+    return `[${time}] approval_resolved: ${data.toolCallId?.slice(0, 8) ?? "-"} ${data.decision ?? ""}`;
+  }
   return `[${time}] ${event.type}: ${JSON.stringify(event.data).slice(0, 200)}`;
 }
 
@@ -324,6 +332,30 @@ function appendEventToMessages(prev: Message[], event: StreamEvent, taskId: stri
       sequence: nextSequence + updated.length - prev.length,
     };
     return { messages: [...updated, message], nextSequence: nextSequence + updated.length - prev.length + 1 };
+  }
+
+  if (event.type === "approval_request") {
+    const data = event.data as { toolCallId?: string; toolName?: string; args?: unknown; reason?: string; kind?: string };
+    const message: Message = {
+      id: randomUUID(),
+      taskId,
+      role: "system",
+      type: "approval_request",
+      content: { toolCallId: data.toolCallId, toolName: data.toolName, args: data.args, reason: data.reason, kind: data.kind },
+      createdAt: timestamp,
+      sequence: nextSequence,
+    };
+    return { messages: [...prev, message], nextSequence: nextSequence + 1 };
+  }
+
+  if (event.type === "approval_resolved") {
+    const data = event.data as { toolCallId?: string; decision?: string };
+    const idx = prev.findIndex((m) => m.type === "approval_request" && (m.content as { toolCallId?: string })?.toolCallId === data.toolCallId);
+    if (idx >= 0) {
+      const updated = [...prev];
+      updated[idx] = { ...updated[idx], content: { ...updated[idx].content as object, decision: data.decision } };
+      return { messages: updated, nextSequence };
+    }
   }
 
   const message: Message = {

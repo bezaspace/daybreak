@@ -111,8 +111,23 @@ describe("SafetyMiddleware", () => {
   it("requires approval for git push", () => {
     const safety = new SafetyMiddleware(config);
     const result = safety.beforeToolCall("bash", { command: "git push origin feature/x" });
-    expect(result.allowed).toBe(false);
+    expect(result.allowed).toBe(true);
+    expect(result.requiresApproval).toBe(true);
     expect(result.reason).toContain("requires explicit approval");
+  });
+
+  it("requires approval for file writes", () => {
+    const safety = new SafetyMiddleware(config);
+    const result = safety.beforeToolCall("write", { path: "src/index.ts", content: "x" });
+    expect(result.allowed).toBe(true);
+    expect(result.requiresApproval).toBe(true);
+  });
+
+  it("requires approval for gh pr create", () => {
+    const safety = new SafetyMiddleware(config);
+    const result = safety.beforeToolCall("bash", { command: "gh pr create --title x" });
+    expect(result.allowed).toBe(true);
+    expect(result.requiresApproval).toBe(true);
   });
 
   it("approves safe bash", () => {

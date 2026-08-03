@@ -305,13 +305,13 @@ Because this is a scope shift, the existing `UI_REVAMP_PLAN.md` milestones are r
 - [x] Costs tab: cost/turns chart.
 - [x] Diff tab: changed files since base branch.
 
-### Phase 5 — Human-in-the-loop approvals
+### Phase 5 — Human-in-the-loop approvals (done)
 
-- Detect destructive tool calls (`bash`, `edit`, `write`, `git push`, PR creation) in `SafetyMiddleware`.
-- Emit `approval_request` events to SSE.
-- Render `ApprovalGate` in chat with Approve / Reject / Approve always.
-- Block the tool call promise until approval is received via Redis pub/sub or polling.
-- Plan-mode: agent returns a plan first, pauses, and waits for "Proceed".
+- [x] Detect destructive tool calls (`bash`, `edit`, `write`, `git push`, PR creation) in `SafetyMiddleware`.
+- [x] Emit `approval_request` events to SSE.
+- [x] Render `ApprovalGate` in chat with Approve / Reject / Approve always.
+- [x] Block the tool call promise until approval is received via Redis pub/sub or polling.
+- [x] Plan-mode: agent returns a plan first, pauses, and waits for "Proceed".
 
 ### Phase 6 — Composer intelligence
 

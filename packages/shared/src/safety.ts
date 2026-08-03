@@ -4,6 +4,7 @@ import { isSensitivePath, sanitizePath } from "./security.js";
 
 export interface SafetyCheck {
   allowed: boolean;
+  requiresApproval?: boolean;
   reason?: string;
   code?: string;
 }
@@ -171,14 +172,26 @@ export class SafetyMiddleware {
 
       const protectedBranch = isGitCommandOnProtectedBranch(args, this.config.protectedBranches);
       if (!protectedBranch.allowed) return protectedBranch;
+
+      if (this.isDestructiveOrDelivery(args) && this.config.requireApprovalForDestructive && !this.autoApproveAll) {
+        const key = this.getApprovalKey(toolName, args);
+        if (!this.approvedCommands.has(key)) {
+          return {
+            allowed: true,
+            requiresApproval: true,
+            reason: `Command requires explicit approval: ${command}`,
+          };
+        }
+      }
     }
 
-    if (toolName === "bash" && this.isDestructiveOrDelivery(args)) {
-      const command = extractString(args, "command") || "";
-      if (this.config.requireApprovalForDestructive && !this.autoApproveAll && !this.approvedCommands.has(command)) {
+    if ((toolName === "write" || toolName === "edit") && this.config.requireApprovalForDestructive && !this.autoApproveAll) {
+      const key = this.getApprovalKey(toolName, args);
+      if (!this.approvedCommands.has(key)) {
         return {
-          allowed: false,
-          reason: `Command requires explicit approval: ${command}`,
+          allowed: true,
+          requiresApproval: true,
+          reason: `File ${toolName} requires explicit approval: ${path || "unknown"}`,
         };
       }
     }
@@ -187,7 +200,16 @@ export class SafetyMiddleware {
   }
 
   approveCommand(command: string): void {
-    this.approvedCommands.add(command);
+    this.approvedCommands.add(this.getApprovalKey("bash", { command }));
+  }
+
+  private getApprovalKey(toolName: string, args: unknown): string {
+    if (toolName === "bash") {
+      const command = extractString(args, "command") || "";
+      return `bash:${command}`;
+    }
+    const path = this.extractPath(args) || JSON.stringify(args);
+    return `${toolName}:${path}`;
   }
 
   private isDestructiveOrDelivery(args: unknown): boolean {
@@ -199,6 +221,7 @@ export class SafetyMiddleware {
       /^\s*rm\s+-rf/,
       /^\s*rm\s+-r/,
       /^\s*git\s+push\s+.*--force/,
+      /^\s*gh\s+pr\s+create/,
     ];
     return patterns.some((re) => re.test(command));
   }

@@ -135,6 +135,14 @@ export function formatEvent(event: StreamEvent): string {
     const data = event.data as { prUrl?: string; prNumber?: number; prBranch?: string };
     return `[${time}] pr_created: #${data.prNumber ?? "-"} ${data.prBranch || "-"} → ${data.prUrl || "-"}`;
   }
+  if (event.type === "approval_request") {
+    const data = event.data as { kind?: string; toolName?: string; reason?: string };
+    return `[${time}] approval_request: ${data.kind || "tool"} ${data.toolName || ""} - ${data.reason || ""}`;
+  }
+  if (event.type === "approval_resolved") {
+    const data = event.data as { toolCallId?: string; decision?: string };
+    return `[${time}] approval_resolved: ${data.toolCallId?.slice(0, 8) ?? "-"} ${data.decision ?? ""}`;
+  }
   return `[${time}] ${event.type}: ${JSON.stringify(event.data).slice(0, 200)}`;
 }
 

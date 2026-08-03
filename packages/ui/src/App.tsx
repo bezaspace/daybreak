@@ -229,7 +229,7 @@ export function App() {
 
   async function startTask(startRepo: string, startBranch: string, startPrompt: string) {
     setStatus("starting");
-    const body: Record<string, unknown> = { repo: startRepo, branch: startBranch };
+    const body: Record<string, unknown> = { repo: startRepo, branch: startBranch, mode };
     if (startPrompt.trim()) body.prompt = startPrompt.trim();
     const res = await fetch("/api/tasks", {
       method: "POST",
@@ -308,6 +308,15 @@ export function App() {
     });
   }
 
+  async function handleApprovalAction(action: "approved" | "rejected" | "approveAlways", toolCallId: string) {
+    if (!activeTaskId) return;
+    await fetch(`/api/tasks/${activeTaskId}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ toolCallId, action }),
+    });
+  }
+
   function handleNewSession() {
     setActiveView("chat");
     setActiveTaskId(null);
@@ -337,7 +346,7 @@ export function App() {
     activeView === "chat" ? (
       <>
         {selectedTask && <ChatHeader task={selectedTask} status={status} isRunning={isRunning} onCancel={() => activeTaskId && cancelTask(activeTaskId)} />}
-        <ChatThread messages={messages} isStreaming={isRunning} task={selectedTask || null} />
+        <ChatThread messages={messages} isStreaming={isRunning} task={selectedTask || null} onApprovalAction={handleApprovalAction} />
         <Composer
           repo={repo}
           branch={branch}

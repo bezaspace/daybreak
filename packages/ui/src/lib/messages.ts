@@ -204,6 +204,30 @@ export function appendEvent(prev: ChatMessage[], event: StreamEvent): ChatMessag
     ];
   }
 
+  if (event.type === "approval_request") {
+    const data = event.data as { toolCallId?: string; toolName?: string; args?: unknown; reason?: string; kind?: string };
+    return [
+      ...prev,
+      {
+        id: data.toolCallId || generateId(),
+        role: "system",
+        type: "approval_request",
+        content: { toolCallId: data.toolCallId, toolName: data.toolName, args: data.args, reason: data.reason, kind: data.kind },
+        createdAt: timestamp,
+      },
+    ];
+  }
+
+  if (event.type === "approval_resolved") {
+    const data = event.data as { toolCallId?: string; decision?: string };
+    const idx = prev.findIndex((m) => m.type === "approval_request" && (m.content as { toolCallId?: string })?.toolCallId === data.toolCallId);
+    if (idx >= 0) {
+      const updated = [...prev];
+      updated[idx] = { ...updated[idx], content: { ...updated[idx].content as object, decision: data.decision } };
+      return updated;
+    }
+  }
+
   return [
     ...prev,
     {

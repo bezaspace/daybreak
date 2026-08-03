@@ -14,6 +14,7 @@ import { createModelRuntime, type ProviderSwitchInfo } from "./llm.js";
 import { MetricsCollector } from "./metrics.js";
 import { SessionStore } from "./session-store.js";
 import { initTelemetry, shutdownTelemetry } from "./telemetry.js";
+import { Redis } from "@upstash/redis";
 
 type ProviderSwitchEvent = { type: "provider_switched" } & ProviderSwitchInfo;
 type FallbackAppliedEvent = { type: "fallback_applied" } & ProviderSwitchInfo;
@@ -26,13 +27,17 @@ type CostAlertEvent = { type: "cost_alert"; threshold: number; limit: number; cu
 type FileTooLargeEvent = { type: "file_too_large"; path: string; size?: number; maxBytes: number; maxLines: number; reason: string };
 type CompactionAdvisedEvent = { type: "compaction_advised"; tokens: number; contextWindow: number; reserveTokens: number };
 type UserMessageEvent = { type: "user_message"; content: string; role: "user" };
-export type TaskEvent = AgentSessionEvent | ProviderSwitchEvent | FallbackAppliedEvent | CheckpointCreatedEvent | CheckpointRestoredEvent | TaskRewindEvent | BranchForkedEvent | CircuitBreakerEvent | CostAlertEvent | FileTooLargeEvent | CompactionAdvisedEvent | UserMessageEvent;
+type ApprovalRequestEvent = { type: "approval_request"; toolCallId: string; toolName: string; args: unknown; reason: string; kind: "tool" | "plan" };
+type ApprovalResolvedEvent = { type: "approval_resolved"; toolCallId: string; decision: "approved" | "rejected" | "approveAlways" };
+export type TaskEvent = AgentSessionEvent | ProviderSwitchEvent | FallbackAppliedEvent | CheckpointCreatedEvent | CheckpointRestoredEvent | TaskRewindEvent | BranchForkedEvent | CircuitBreakerEvent | CostAlertEvent | FileTooLargeEvent | CompactionAdvisedEvent | UserMessageEvent | ApprovalRequestEvent | ApprovalResolvedEvent;
 
 export interface RunOptions {
   prompt: string;
   cwd: string;
   systemPrompt?: string;
   autoApprove?: boolean;
+  planMode?: boolean;
+  approvalRedis?: Redis;
   onStream?: (text: string) => void;
   onEvent?: (event: TaskEvent) => void;
   onSessionReady?: (session: AgentSession) => void;
@@ -68,6 +73,9 @@ export class TaskRunner {
   private lastToolCallId?: string;
   private startedAt?: number;
   private costAlertSent = false;
+  private planMode = false;
+  private planApproved = false;
+  private approvalRedis?: Redis;
 
   constructor(config: DaybreakConfig) {
     this.config = config;
@@ -81,10 +89,13 @@ export class TaskRunner {
   }
 
   async run(options: RunOptions): Promise<TaskResult> {
-    const { prompt, cwd, systemPrompt, autoApprove, onStream, onEvent, onSessionReady, taskId: explicitTaskId, checkpoint, isFork } = options;
+    const { prompt, cwd, systemPrompt, autoApprove, planMode, approvalRedis, onStream, onEvent, onSessionReady, taskId: explicitTaskId, checkpoint, isFork } = options;
     this.onEvent = onEvent;
     this.startedAt = Date.now();
     this.safety.setCwd(cwd);
+    this.approvalRedis = approvalRedis;
+    this.planMode = planMode ?? false;
+    this.planApproved = false;
 
     const telemetry = initTelemetry({
       taskId: explicitTaskId,
@@ -181,7 +192,7 @@ export class TaskRunner {
       this.session.agent.state.systemPrompt = systemPrompt;
     }
 
-    if (autoApprove) {
+    if (autoApprove && !this.planMode) {
       this.safety.approveAll();
     }
 
@@ -271,6 +282,21 @@ export class TaskRunner {
     if (!this.session) return;
 
     this.session.agent.beforeToolCall = async ({ toolCall, args }) => {
+      if (this.planMode && !this.planApproved) {
+        const decision = await this.waitForApproval(
+          toolCall.id,
+          toolCall.name,
+          args,
+          "Plan requires your approval to proceed",
+          "plan",
+        );
+        this.planApproved = decision.approved;
+        if (decision.approveAll) this.safety.approveAll();
+        if (!decision.approved) {
+          return { block: true, reason: "Plan not approved" };
+        }
+      }
+
       const check = this.safety.beforeToolCall(toolCall.name, args);
       if (!check.allowed) {
         console.error(pc.red(`[safety block] ${toolCall.name}: ${check.reason}`));
@@ -281,8 +307,90 @@ export class TaskRunner {
         }
         return { block: true, reason: check.reason };
       }
+
+      if (check.requiresApproval) {
+        const decision = await this.waitForApproval(
+          toolCall.id,
+          toolCall.name,
+          args,
+          check.reason ?? "Action requires explicit approval",
+          "tool",
+        );
+        if (decision.approveAll) this.safety.approveAll();
+        if (!decision.approved) {
+          return { block: true, reason: "Action rejected by user" };
+        }
+      }
+
       return {};
     };
+  }
+
+  private async waitForApproval(
+    toolCallId: string,
+    toolName: string,
+    args: unknown,
+    reason: string,
+    kind: "tool" | "plan",
+  ): Promise<{ approved: boolean; approveAll: boolean }> {
+    if (!this.taskId || !this.approvalRedis) {
+      console.warn(pc.yellow(`[approval] no Redis client; blocking ${toolName}`));
+      return { approved: false, approveAll: false };
+    }
+
+    const taskId = this.taskId;
+    const specificKey = `daybreak:approvals:${taskId}:${toolCallId}`;
+    const allKey = `daybreak:approvals:${taskId}:__all__`;
+
+    const safeArgs = toolName === "write" || toolName === "edit"
+      ? (args && typeof args === "object" ? { ...args as object, content: "<redacted>" } : args)
+      : args;
+
+    this.onEvent?.({ type: "approval_request", toolCallId, toolName, args: safeArgs, reason, kind });
+    const start = Date.now();
+    this.stopWallClockTimer();
+
+    try {
+      while (true) {
+        const all = await this.approvalRedis.get(allKey);
+        if (all === "true") {
+          this.onEvent?.({ type: "approval_resolved", toolCallId, decision: "approveAlways" });
+          return { approved: true, approveAll: true };
+        }
+
+        const value = await this.approvalRedis.get(specificKey);
+        if (value && typeof value === "string") {
+          const parsed = JSON.parse(value) as { action?: string };
+          if (parsed.action === "approved") {
+            this.onEvent?.({ type: "approval_resolved", toolCallId, decision: "approved" });
+            return { approved: true, approveAll: false };
+          }
+          if (parsed.action === "approveAlways") {
+            this.onEvent?.({ type: "approval_resolved", toolCallId, decision: "approveAlways" });
+            return { approved: true, approveAll: true };
+          }
+          if (parsed.action === "rejected") {
+            this.onEvent?.({ type: "approval_resolved", toolCallId, decision: "rejected" });
+            return { approved: false, approveAll: false };
+          }
+        }
+
+        const elapsed = Date.now() - start;
+        if (elapsed > 30 * 60 * 1000) {
+          console.warn(pc.yellow(`[approval] timeout waiting for ${toolName}`));
+          this.onEvent?.({ type: "approval_resolved", toolCallId, decision: "rejected" });
+          return { approved: false, approveAll: false };
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    } finally {
+      const pause = Date.now() - start;
+      if (this.startedAt) {
+        this.startedAt += pause;
+      }
+      this.startWallClockTimer();
+    }
   }
 
   private wireTelemetry(onEvent?: (event: TaskEvent) => void): void {
@@ -511,10 +619,12 @@ export class TaskRunner {
 
   private startWallClockTimer(): void {
     const maxMs = this.config.maxWallClockMinutes * 60 * 1000;
+    const elapsed = this.startedAt ? Date.now() - this.startedAt : 0;
+    const remaining = Math.max(0, maxMs - elapsed);
     this.wallClockTimer = setTimeout(() => {
       const elapsedMinutes = this.startedAt ? (Date.now() - this.startedAt) / 60_000 : this.config.maxWallClockMinutes;
       this.abort(`Max wall-clock time (${this.config.maxWallClockMinutes}m) reached`, { reason: "max_wall_clock", limit: this.config.maxWallClockMinutes, current: elapsedMinutes });
-    }, maxMs);
+    }, remaining);
   }
 
   private stopWallClockTimer(): void {

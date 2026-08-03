@@ -7,9 +7,10 @@ interface ChatThreadProps {
   messages: ChatMessage[];
   isStreaming: boolean;
   task: Task | null;
+  onApprovalAction?: (action: "approved" | "rejected" | "approveAlways", toolCallId: string) => void;
 }
 
-export function ChatThread({ messages, isStreaming, task }: ChatThreadProps) {
+export function ChatThread({ messages, isStreaming, task, onApprovalAction }: ChatThreadProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -35,7 +36,7 @@ export function ChatThread({ messages, isStreaming, task }: ChatThreadProps) {
       <div className="flex-1 overflow-y-auto px-4 py-6 scrollbar-thin">
         <div className="mx-auto max-w-3xl space-y-4">
           {messages.map((message) => (
-            <MessageBubble key={message.id} message={message} />
+            <MessageBubble key={message.id} message={message} taskId={task?.id} onApprovalAction={onApprovalAction} />
           ))}
           {isStreaming && (
             <div className="flex items-center gap-2 px-4 text-sm text-db-text-tertiary">
