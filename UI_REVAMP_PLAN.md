@@ -1,7 +1,7 @@
 # Daybreak UI Revamp Plan
 
-**Status:** Draft plan — awaiting approval before implementation.  
-**Scope:** `packages/ui` plus the minimal control-plane endpoints required to support new UI interactions.  
+**Status:** Superseded by [`CHAT_FIRST_UI_PLAN.md`](./CHAT_FIRST_UI_PLAN.md). The foundation work in this document (design tokens, Base UI wrappers, dark theme, sidebar shell) has already been implemented in Milestone 0. The product direction has since shifted to a chat-first, three-pane agent experience; see the new plan for the updated scope.  
+**Scope (historical):** `packages/ui` plus the minimal control-plane endpoints required to support new UI interactions.  
 **Component library:** [`@base-ui/react`](https://base-ui.com/react/overview/quick-start) (unstyled, accessible primitives) + **Tailwind CSS** for styling.  
 **Theme:** Dark-only, jet-black heavy (`#050505` / `#0a0a0a` / `#111111`) with subtle gray (`#171717`, `#262626`) surfaces, electric-indigo (`#6366f1`) as the primary accent, and green/red/yellow semantic accents.
 
