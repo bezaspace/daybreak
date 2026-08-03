@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { CostDashboard } from "./CostDashboard.js";
 import { TraceView } from "./TraceView.js";
 import { TimeTravelView } from "./TimeTravelView.js";
+import { CiHealView } from "./CiHealView.js";
 
 interface StreamEvent {
   id: string;
@@ -11,7 +12,7 @@ interface StreamEvent {
   data: unknown;
 }
 
-interface Task {
+export interface Task {
   id: string;
   repo: string;
   branch: string;
@@ -31,6 +32,9 @@ interface Task {
   rootCheckpointId?: string;
   parentTaskId?: string;
   parentCheckpointId?: string;
+  headSha?: string;
+  checkRunId?: string;
+  healAttempt?: number;
 }
 
 interface Screenshot {
@@ -100,9 +104,9 @@ function formatEvent(event: StreamEvent): string {
     return `[${time}] ${event.type}${provider}${cost}${data.error ? ": " + data.error : ""}`;
   }
   if (event.type === "sandbox_created" || event.type === "sandbox_resumed" || event.type === "sandbox_keep_alive") {
-    const data = event.data as { sandboxId?: string; keepAliveUntil?: number; isReview?: boolean };
+    const data = event.data as { sandboxId?: string; keepAliveUntil?: number; isReview?: boolean; isHeal?: boolean };
     const until = data.keepAliveUntil ? ` until ${new Date(data.keepAliveUntil).toLocaleTimeString()}` : "";
-    return `[${time}] ${event.type}: sandbox=${data.sandboxId || "-"}${until}${data.isReview ? " review" : ""}`;
+    return `[${time}] ${event.type}: sandbox=${data.sandboxId || "-"}${until}${data.isReview ? " review" : ""}${data.isHeal ? " heal" : ""}`;
   }
   if (event.type === "review_task_start") {
     const data = event.data as { sandboxId?: string; prBranch?: string };
@@ -111,6 +115,22 @@ function formatEvent(event: StreamEvent): string {
   if (event.type === "review_complete" || event.type === "review_failed") {
     const data = event.data as { success?: boolean; summary?: string; error?: string };
     return `[${time}] ${event.type}: ${data.success ? "success" : "failed"}${data.summary ? " " + data.summary.slice(0, 120) : ""}${data.error ? ": " + data.error : ""}`;
+  }
+  if (event.type === "ci_failure_received") {
+    const data = event.data as { checkName?: string; headBranch?: string; headSha?: string; prNumber?: number; repo?: string; repoUrl?: string; healAttempt?: number };
+    return `[${time}] ci_failure_received: '${data.checkName || "-"}' failed on PR #${data.prNumber ?? "-"} (${data.headBranch || "-"}, ${(data.headSha ?? "").slice(0, 7)})${data.healAttempt ? ` attempt ${data.healAttempt}` : ""}`;
+  }
+  if (event.type === "ci_logs_fetched") {
+    const data = event.data as { annotationsCount?: number; logBytes?: number; errorContextLength?: number; checkRunId?: string };
+    return `[${time}] ci_logs_fetched: annotations=${data.annotationsCount ?? 0} logBytes=${data.logBytes ?? 0} errorContext=${data.errorContextLength ?? 0}B`;
+  }
+  if (event.type === "heal_task_start") {
+    const data = event.data as { sandboxId?: string; prBranch?: string; taskId?: string };
+    return `[${time}] heal_task_start: prBranch=${data.prBranch || "-"} sandbox=${data.sandboxId || "-"} task=${data.taskId ?? event.taskId}`;
+  }
+  if (event.type === "heal_complete" || event.type === "heal_failed" || event.type === "heal_skipped") {
+    const data = event.data as { success?: boolean; error?: string; reason?: string };
+    return `[${time}] ${event.type}: ${data.reason ?? (data.success ? "success" : data.error ?? "failed")}`;
   }
   if (event.type === "checkpoint_created") {
     const data = event.data as { turn?: number; checkpointId?: string; gitCommit?: string; costUsd?: number };
@@ -177,7 +197,7 @@ export function App() {
   const [config, setConfig] = useState<Config | null>(null);
   const terminalRef = useRef<HTMLPreElement>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [view, setView] = useState<"run" | "trace" | "costs" | "time-travel">("run");
+  const [view, setView] = useState<"run" | "trace" | "costs" | "time-travel" | "ci-heal">("run");
 
   function loadTasks() {
     fetch("/api/tasks")
@@ -390,6 +410,9 @@ export function App() {
           <button type="button" disabled={view === "costs"} onClick={() => setView("costs")}>
             Costs
           </button>
+          <button type="button" disabled={view === "ci-heal"} onClick={() => setView("ci-heal")}>
+            CI Heal
+          </button>
         </div>
       )}
 
@@ -406,6 +429,8 @@ export function App() {
       {view === "time-travel" && taskId && <TimeTravelView taskId={taskId} />}
 
       {view === "costs" && <CostDashboard />}
+
+      {view === "ci-heal" && <CiHealView tasks={tasks} />}
 
       {view !== "run" ? null : screenshots.length > 0 && (
         <div style={{ marginBottom: "1rem" }}>
@@ -452,8 +477,15 @@ export function App() {
             }}
           >
             <code>{t.id}</code> — {t.repo} @ {t.branch} · {t.status}
-            {t.parentTaskId && ` · branch of ${t.parentTaskId.slice(0, 8)}`}
-            {t.prBranch && ` · ${t.prBranch}`}
+            {t.triggerSource ? ` · ${t.triggerSource}` : ""}
+            {t.triggerSource === "check_run"
+              ? ` · heal of ${t.prBranch || "-"}${typeof t.prNumber === "number" ? ` #${t.prNumber}` : ""}${t.headSha ? ` · ${t.headSha.slice(0, 7)}` : ""}`
+              : t.parentTaskId
+                ? ` · branch of ${t.parentTaskId.slice(0, 8)}`
+                : t.prBranch
+                  ? ` · ${t.prBranch}`
+                  : ""}
+            {t.healAttempt ? ` · attempt ${t.healAttempt}` : ""}
             {t.provider ? ` · ${t.provider}` : ""}
             {typeof t.costUsd === "number" ? ` · $${t.costUsd.toFixed(4)}` : ""}
             {t.prUrl && (

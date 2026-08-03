@@ -139,14 +139,14 @@ This document breaks the Phase 5 exit criteria into small, independently-demoabl
 
 **What it ships:** The React dashboard surfaces CI failures, heal tasks, and their outcomes alongside the existing task list.
 
-- [ ] Update `packages/ui/src/App.tsx` `formatEvent` to render:
+- [x] Update `packages/ui/src/App.tsx` `formatEvent` to render:
   - `ci_failure_received` — show check name, branch, conclusion.
   - `ci_logs_fetched` — show bytes / annotations count.
   - `heal_task_start` — show task id and branch.
   - `heal_complete` / `heal_failed` / `heal_skipped` — show status and reason.
-- [ ] Update the "Recent tasks" list to show `triggerSource` and, for `check_run` tasks, the `prNumber` / `headSha` (if available).
-- [ ] (Optional) Add a small `CiHealView.tsx` tab or panel that lists recent `check_run` heal attempts with status, PR link, and cost. This can reuse the existing `/api/tasks` data.
-- [ ] Ensure the UI distinguishes branch tasks (`branch of <taskId>`) from heal tasks (`heal of <prBranch>`).
+- [x] Update the "Recent tasks" list to show `triggerSource` and, for `check_run` tasks, the `prNumber` / `headSha` (if available).
+- [x] Add a small `CiHealView.tsx` tab or panel that lists recent `check_run` heal attempts with status, PR link, and cost. This reuses the existing `/api/tasks` data.
+- [x] Ensure the UI distinguishes branch tasks (`branch of <taskId>`) from heal tasks (`heal of <prBranch>`).
 
 **Acceptance:**
 - A `check_run` failure appears in the dashboard terminal with the failed check name and branch.
