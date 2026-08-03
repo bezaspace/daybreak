@@ -55,19 +55,19 @@ This document breaks the Phase 5 exit criteria into small, independently-demoabl
 
 **What it ships:** A dedicated module downloads the failed job logs and annotations from the GitHub API and extracts a concise, token-budgeted error context for the agent prompt.
 
-- [ ] Add `packages/control-plane/src/ci-logs.ts` with a `CiLogFetcher` / `CiLogParser`:
+- [x] Add `packages/control-plane/src/ci-logs.ts` with a `CiLogFetcher` / `CiLogParser`:
   - `fetchAnnotations(owner, repo, checkRunId)`: `GET /repos/{owner}/{repo}/check-runs/{checkRunId}/annotations`; keep only `annotation_level === "failure"` entries with `path`, `start_line`, `message`, `title`.
   - `fetchJobLogs(owner, repo, jobId)`: `GET /repos/{owner}/{repo}/actions/jobs/{jobId}/logs` and follow the `Location` redirect. Limit download to `DAYBREAK_MAX_CI_LOG_BYTES` (default 512 KiB) and, if truncated, read from the end of the log where errors usually appear.
   - `parseErrorContext(logs, annotations, output)`: remove timestamps / ANSI control markers, find error patterns (`FAIL`, `Error:`, `error:`, `npm ERR!`, `Tests: ... failed`, `AssertionError`, etc.), and extract a configurable window of context lines (`DAYBREAK_CI_LOG_CONTEXT_LINES`, default 20) around the first few failure blocks.
   - `redactSecrets(text)`: strip obvious secret-like patterns (`token=...`, `api_key=...`, `SECRET=...`, URLs with embedded credentials) as defense-in-depth before the text reaches the LLM context.
-- [ ] Add `packages/control-plane/src/ci-logs.test.ts` with fixtures for:
+- [x] Add `packages/control-plane/src/ci-logs.test.ts` with fixtures for:
   - A sample GitHub Actions plain-text log (timestamps, group markers, `npm test` failure).
   - A sample annotations list.
   - Assertions that the returned `errorContext` is under the token budget and contains the relevant failure lines.
-- [ ] Add config to `packages/shared/src/config.ts` and `.env.example`:
+- [x] Add config to `packages/shared/src/config.ts` and `.env.example`:
   - `DAYBREAK_MAX_CI_LOG_BYTES` (default 524288)
   - `DAYBREAK_CI_LOG_CONTEXT_LINES` (default 20)
-- [ ] Update `decisions.md` with the chosen log-fetch strategy:
+- [x] Update `decisions.md` with the chosen log-fetch strategy:
   - `actions/jobs/{job_id}/logs` is the primary source because `check_run.id` equals the Actions job id.
   - Annotations are fetched first as a fast, structured fallback.
   - Raw logs are truncated and cleaned before being injected into the prompt.

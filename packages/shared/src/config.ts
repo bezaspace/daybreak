@@ -41,6 +41,8 @@ export interface DaybreakConfig {
   ciSelfHealEnabled: boolean;
   prBranchPrefix: string;
   maxHealAttemptsPerPr: number;
+  maxCiLogBytes: number;
+  ciLogContextLines: number;
 }
 
 const DEFAULT_MAX_TURNS = 40;
@@ -57,6 +59,8 @@ const DEFAULT_MAX_CHECKPOINTS_PER_TASK = 100;
 const DEFAULT_CI_SELF_HEAL_ENABLED = true;
 const DEFAULT_PR_BRANCH_PREFIX = "daybreak/";
 const DEFAULT_MAX_HEAL_ATTEMPTS_PER_PR = 2;
+const DEFAULT_MAX_CI_LOG_BYTES = 524288;
+const DEFAULT_CI_LOG_CONTEXT_LINES = 20;
 
 export const DEFAULT_DENYLIST_PATTERNS: string[] = [
   ".env",
@@ -177,6 +181,8 @@ export function loadConfig(envPath?: string): DaybreakConfig {
     ciSelfHealEnabled: get("DAYBREAK_CI_SELF_HEAL_ENABLED") !== "false",
     prBranchPrefix: get("DAYBREAK_PR_BRANCH_PREFIX") || DEFAULT_PR_BRANCH_PREFIX,
     maxHealAttemptsPerPr: parseIntEnv("DAYBREAK_MAX_HEAL_ATTEMPTS_PER_PR", DEFAULT_MAX_HEAL_ATTEMPTS_PER_PR),
+    maxCiLogBytes: parseIntEnv("DAYBREAK_MAX_CI_LOG_BYTES", DEFAULT_MAX_CI_LOG_BYTES),
+    ciLogContextLines: parseIntEnv("DAYBREAK_CI_LOG_CONTEXT_LINES", DEFAULT_CI_LOG_CONTEXT_LINES),
   };
 }
 

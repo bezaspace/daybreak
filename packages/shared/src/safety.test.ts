@@ -16,6 +16,8 @@ const config: DaybreakConfig = {
   ciSelfHealEnabled: true,
   prBranchPrefix: "daybreak/",
   maxHealAttemptsPerPr: 2,
+  maxCiLogBytes: 524288,
+  ciLogContextLines: 20,
 };
 
 describe("isSensitivePath", () => {

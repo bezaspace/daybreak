@@ -446,6 +446,20 @@
 
 ---
 
+## D38. CI self-healing failure context (Phase 5 M2)
+
+**Decision:** Build a dedicated `packages/control-plane/src/ci-logs.ts` module that fetches structured `check_run` annotations first, then downloads the raw job logs via `GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs`, truncates from the end to a configurable byte budget, strips timestamps / ANSI control codes / GitHub group markers, extracts a configurable window of context around each failure block, and redacts secrets before the text reaches the agent prompt.
+
+**Rationale:** Annotations provide precise failure locations (path and line number), while raw logs contain the actual error output and stack traces. The `check_run.id` GitHub exposes is the Actions job id, so the `actions/jobs/{job_id}/logs` endpoint is the correct primary source. Truncating from the end of the log preserves the most recent failure output, which is usually where the actionable information lives. Secret redaction is defense-in-depth against leaking repository or cloud credentials into the LLM context.
+
+**Consequences:**
+- `CiLogFetcher` fetches `check-runs/{id}/annotations` and `actions/jobs/{id}/logs`, following the 302 redirect and respecting `DAYBREAK_MAX_CI_LOG_BYTES` (default 512 KiB).
+- `CiLogParser` cleans the log and extracts failure blocks using markers such as `FAIL`, `Error:`, `npm ERR!`, `Tests: ... failed`, and `AssertionError`, keeping `DAYBREAK_CI_LOG_CONTEXT_LINES` (default 20) on each side.
+- `redactSecrets` removes `token=...`, `api_key=...`, `SECRET=...`, bearer tokens, URL credentials, and query-string credentials without mangling surrounding text.
+- This module is consumed by the heal-task builder in M3 and is unit-tested against a 100 KB mocked log fixture.
+
+---
+
 ## D30. Open questions that can change these decisions
 
 - ~~Can `pi-agent-core` serialize and fork sessions cleanly?~~ **Answered in Phase 4 M1/M3:** `SessionManager` writes a `.jsonl` that can be copied and reopened with `SessionManager.open`; true in-process forking is not required because we always start a fresh `TaskRunner` from the restored state.
