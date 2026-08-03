@@ -1,6 +1,7 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { loadConfig } from "@daybreak/shared";
 import type { Checkpoint, PersistedCheckpoint } from "@daybreak/shared";
+import { randomUUID } from "node:crypto";
 
 let memoryDeadLetterId = 0;
 const memoryDeadLetterTasks: DeadLetterTask[] = [];
@@ -53,6 +54,29 @@ export interface PersistedEvent {
   timestamp: number;
   event_id?: string | null;
   created_at?: string;
+}
+
+export interface PersistedMessage {
+  id: string;
+  task_id: string;
+  role: string;
+  type: string;
+  content: unknown;
+  status?: string | null;
+  sequence: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface Message {
+  id: string;
+  taskId: string;
+  role: "user" | "assistant" | "system" | "tool" | "artifact";
+  type: "text" | "tool_call" | "tool_result" | "approval_request" | "checkpoint" | "cost_alert" | "status" | "error";
+  content: unknown;
+  status?: "pending" | "running" | "complete" | "error";
+  sequence: number;
+  createdAt: number;
 }
 
 export interface Task {
@@ -646,6 +670,89 @@ export async function updateCheckpoint(id: string, updates: Partial<Pick<Checkpo
   const { error } = await supabase.from("checkpoints").update(payload).eq("id", id);
   if (error) {
     console.error("[db] updateCheckpoint error:", error.message);
+    return false;
+  }
+  return true;
+}
+
+function toMessage(row: PersistedMessage): Message {
+  return {
+    id: row.id,
+    taskId: row.task_id,
+    role: row.role as Message["role"],
+    type: row.type as Message["type"],
+    content: row.content,
+    status: row.status ? (row.status as Message["status"]) : undefined,
+    sequence: row.sequence,
+    createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
+  };
+}
+
+export function newMessageId(): string {
+  return randomUUID();
+}
+
+export async function getMessages(taskId: string, after = 0): Promise<Message[]> {
+  const supabase = getSupabase();
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from("task_messages")
+    .select("*")
+    .eq("task_id", taskId)
+    .gt("sequence", after)
+    .order("sequence", { ascending: true })
+    .returns<PersistedMessage[]>();
+  if (error) {
+    console.error("[db] getMessages error:", error.message);
+    return [];
+  }
+  return (data || []).map(toMessage);
+}
+
+export async function persistMessage(message: Message): Promise<boolean> {
+  const supabase = getSupabase();
+  if (!supabase) return false;
+  const { error } = await supabase.from("task_messages").upsert({
+    id: message.id,
+    task_id: message.taskId,
+    role: message.role,
+    type: message.type,
+    content: message.content,
+    status: message.status ?? null,
+    sequence: message.sequence,
+    created_at: new Date(message.createdAt).toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+  if (error) {
+    console.error("[db] persistMessage error:", error.message);
+    return false;
+  }
+  return true;
+}
+
+export async function persistMessages(taskId: string, messages: Message[]): Promise<boolean> {
+  const supabase = getSupabase();
+  if (!supabase) return false;
+  const { error: deleteError } = await supabase.from("task_messages").delete().eq("task_id", taskId);
+  if (deleteError) {
+    console.error("[db] persistMessages delete error:", deleteError.message);
+    return false;
+  }
+  if (messages.length === 0) return true;
+  const rows = messages.map((message) => ({
+    id: message.id,
+    task_id: message.taskId,
+    role: message.role,
+    type: message.type,
+    content: message.content,
+    status: message.status ?? null,
+    sequence: message.sequence,
+    created_at: new Date(message.createdAt).toISOString(),
+    updated_at: new Date().toISOString(),
+  }));
+  const { error } = await supabase.from("task_messages").insert(rows);
+  if (error) {
+    console.error("[db] persistMessages insert error:", error.message);
     return false;
   }
   return true;

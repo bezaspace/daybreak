@@ -96,12 +96,14 @@ export function App() {
 
   async function loadTaskAndMessages(taskId: string) {
     try {
-      const [taskRes, eventsRes] = await Promise.all([
+      const [taskRes, eventsRes, messagesRes] = await Promise.all([
         fetch(`/api/tasks/${taskId}`),
         fetch(`/api/tasks/${taskId}/events`),
+        fetch(`/api/tasks/${taskId}/messages`),
       ]);
       const task = (await taskRes.json()) as Task | undefined;
       const history = (await eventsRes.json()) as StreamEvent[] | undefined;
+      const serverMessages = (await messagesRes.json()) as ChatMessage[] | undefined;
       if (task) {
         setStatus(task.status);
         if (task.provider) setActiveProvider(task.provider);
@@ -110,7 +112,11 @@ export function App() {
         if (task.prBranch) setPrBranch(task.prBranch);
       }
       setEvents(Array.isArray(history) ? history : []);
-      setMessages(buildMessagesFromEvents(history || [], task?.prompt));
+      setMessages(
+        Array.isArray(serverMessages) && serverMessages.length > 0
+          ? serverMessages
+          : buildMessagesFromEvents(history || [], task?.prompt),
+      );
       setScreenshots(extractScreenshots(history || []));
     } catch {
       // ignore

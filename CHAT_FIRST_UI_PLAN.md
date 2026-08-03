@@ -280,13 +280,13 @@ Because this is a scope shift, the existing `UI_REVAMP_PLAN.md` milestones are r
 - [x] Keep the current Run/Costs/etc. views accessible but mark them legacy.
 - [x] Build `Composer` with mode selector (Plan / Interactive / Autopilot) and simple repo/branch pickers.
 
-### Phase 2 — Message model and persistence
+### Phase 2 — Message model and persistence (done)
 
-- Add `messages` table and `Message` type.
-- Normalize incoming `StreamEvent`s into messages on the server.
-- Add `GET /api/tasks/:id/messages` returning messages.
-- UI fetches messages on conversation open and merges SSE updates.
-- Preserve old `/api/tasks/:id/events` for compatibility.
+- [x] Add `messages` table and `Message` type.
+- [x] Normalize incoming `StreamEvent`s into messages on the server.
+- [x] Add `GET /api/tasks/:id/messages` returning messages.
+- [x] UI fetches messages on conversation open and merges SSE updates.
+- [x] Preserve old `/api/tasks/:id/events` for compatibility.
 
 ### Phase 3 — User can talk back
 

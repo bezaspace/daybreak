@@ -19,6 +19,8 @@ import {
   updateTask,
   persistEvent,
   getEvents,
+  getMessages,
+  persistMessages,
   getSupabase,
   listCheckpoints,
   getCheckpoint,
@@ -29,6 +31,7 @@ import {
   type Task,
   type StreamEvent,
 } from "./db.js";
+import { buildMessagesFromEvents, MessageBuilder } from "./messages.js";
 import { CiLogFetcher, CiLogParser, type CheckRunOutput } from "./ci-logs.js";
 import { TaskQueue, type TaskSpec } from "./queue.js";
 import { createIdempotencyKey, IdempotencyStore } from "./idempotency.js";
@@ -135,7 +138,7 @@ async function publishEvent(taskId: string, type: string, data: unknown) {
   } catch {
     // Non-JSON payloads are persisted as-is.
   }
-  const event: StreamEvent = { id: `${taskId}-pr`, taskId, type, timestamp: Date.now(), data: safeData };
+  const event: StreamEvent = { id: randomUUID(), taskId, type, timestamp: Date.now(), data: safeData };
   try {
     await persistEvent(taskId, event);
     await publishToRedis(taskId, event);
@@ -157,10 +160,16 @@ async function syncEventsFromRedis(taskId: string) {
   try {
     const redis = getRedis();
     const raw = await redis.lrange(`daybreak:stream:${taskId}`, 0, -1);
-    for (const item of raw) {
-      const event = typeof item === "string" ? (JSON.parse(item) as StreamEvent) : (item as StreamEvent);
+    const events = raw.map((item) =>
+      typeof item === "string" ? (JSON.parse(item) as StreamEvent) : (item as StreamEvent),
+    );
+    if (events.length === 0) return;
+    for (const event of events) {
       await persistEvent(taskId, event);
     }
+    const task = await getTask(taskId);
+    const messages = buildMessagesFromEvents(events, taskId, task?.prompt);
+    await persistMessages(taskId, messages);
   } catch (error) {
     console.error(`[control-plane] syncEventsFromRedis error for ${taskId}:`, error);
   }
@@ -1544,6 +1553,20 @@ app.get("/api/tasks/:id/events", async (c) => {
   return c.json(events);
 });
 
+app.get("/api/tasks/:id/messages", async (c) => {
+  const id = c.req.param("id");
+  await syncEventsFromRedis(id);
+  let messages = await getMessages(id);
+  if (messages.length === 0) {
+    const task = await getTask(id);
+    const events = await getEvents(id);
+    const built = buildMessagesFromEvents(events, id, task?.prompt);
+    await persistMessages(id, built);
+    messages = built;
+  }
+  return c.json(messages);
+});
+
 app.get("/api/tasks/:id/checkpoints", async (c) => {
   const id = c.req.param("id");
   const checkpoints = await listCheckpoints(id);
@@ -1685,12 +1708,17 @@ app.get("/api/tasks/:id/stream", (c) => {
     while (!stream.aborted) {
       const raw = await redis.lrange(`daybreak:stream:${id}`, cursor, -1);
       if (raw.length > 0) {
+        const existing = await getMessages(id);
+        const builder = new MessageBuilder(id, existing);
         for (const item of raw) {
           const event = typeof item === "string" ? (JSON.parse(item) as StreamEvent) : (item as StreamEvent);
           await persistEvent(id, event);
+          builder.append(event);
           await stream.writeSSE({ data: JSON.stringify(event) });
           cursor++;
         }
+        const updated = builder.getMessages();
+        await persistMessages(id, updated);
       }
       await stream.sleep(500);
     }
