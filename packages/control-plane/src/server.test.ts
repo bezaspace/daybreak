@@ -137,8 +137,9 @@ describe("control-plane webhooks", () => {
     expect(res.status).toBe(202);
     const json = (await res.json()) as { taskId?: string; status?: string };
     expect(json.taskId).toBeDefined();
-    expect(json.status).toBe("running");
+    expect(json.status).toBe("pending");
 
+    await new Promise((resolve) => setTimeout(resolve, 50));
     const tasksRes = await app.request("/api/tasks");
     expect(tasksRes.status).toBe(200);
     const tasks = (await tasksRes.json()) as Array<{ repo: string; triggerSource: string; githubSender: string; status: string }>;
@@ -147,7 +148,7 @@ describe("control-plane webhooks", () => {
     expect(task).toBeDefined();
     expect(task?.triggerSource).toBe("issue_comment");
     expect(task?.githubSender).toBe("testuser");
-    expect(task?.status).toBe("running");
+    expect(["pending", "running", "complete", "failed"]).toContain(task?.status);
   });
 
   it("ignores an issue_comment without @daybreak-bot mention", async () => {
@@ -254,16 +255,17 @@ describe("check_run webhooks", () => {
       const json = (await res.json()) as { taskId?: string; prBranch?: string; status?: string; headSha?: string };
       expect(json.taskId).toBeDefined();
       expect(json.prBranch).toBe(branch);
-      expect(json.status).toBe("running");
+      expect(json.status).toBe("pending");
       expect(json.headSha).toBe("abc123def456");
 
+      await new Promise((resolve) => setTimeout(resolve, 50));
       const tasksRes = await app.request("/api/tasks");
       expect(tasksRes.status).toBe(200);
       const tasks = (await tasksRes.json()) as Array<{ repo: string; prBranch: string; triggerSource?: string; status: string; headSha?: string; checkRunId?: string }>;
       const task = tasks.find((t) => t.repo === "https://github.com/bezaspace/daybreak-target.git" && t.prBranch === branch);
       expect(task).toBeDefined();
       expect(task?.triggerSource).toBe("check_run");
-      expect(["running", "complete", "failed"]).toContain(task?.status);
+      expect(["pending", "running", "complete", "failed"]).toContain(task?.status);
       expect(task?.headSha).toBe("abc123def456");
       expect(task?.checkRunId).toBe("987654321");
 

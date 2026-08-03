@@ -50,6 +50,18 @@ interface Config {
   compactionEnabled: boolean;
   e2bTemplate?: string;
   provider?: string;
+  maxConcurrentTasks: number;
+  queueWorkerEnabled: boolean;
+}
+
+interface QueueStatus {
+  pending: number;
+  running: number;
+  maxConcurrent: number;
+  workerEnabled: boolean;
+  workerPollMs: number;
+  workerPending: number;
+  workerRunning: number;
 }
 
 interface TaskMetrics {
@@ -66,6 +78,13 @@ function formatEvent(event: StreamEvent): string {
   if (event.type === "task_start") {
     const data = event.data as { repo?: string; branch?: string };
     return `[${time}] task_start: ${data.repo} @ ${data.branch}`;
+  }
+  if (event.type === "task_pending") {
+    const data = event.data as { repo?: string; branch?: string };
+    return `[${time}] task_pending: ${data.repo} @ ${data.branch}`;
+  }
+  if (event.type === "task_cancelled") {
+    return `[${time}] task_cancelled`;
   }
   if (event.type === "message_update") {
     const data = event.data as { kind?: string; delta?: string };
@@ -195,6 +214,7 @@ export function App() {
   const [metrics, setMetrics] = useState<TaskMetrics | null>(null);
   const [activeProvider, setActiveProvider] = useState<string | null>(null);
   const [config, setConfig] = useState<Config | null>(null);
+  const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
   const terminalRef = useRef<HTMLPreElement>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [view, setView] = useState<"run" | "trace" | "costs" | "time-travel" | "ci-heal">("run");
@@ -213,9 +233,22 @@ export function App() {
       .catch(() => {});
   }
 
+  function loadQueueStatus() {
+    fetch("/api/queue/status")
+      .then((r) => r.json())
+      .then((data) => setQueueStatus(data as QueueStatus))
+      .catch(() => {});
+  }
+
   useEffect(() => {
     loadTasks();
     loadConfig();
+    loadQueueStatus();
+    const interval = setInterval(() => {
+      loadTasks();
+      loadQueueStatus();
+    }, 2000);
+    return () => clearInterval(interval);
   }, []);
 
   const selectedTask = taskId ? tasks.find((t) => t.id === taskId) : undefined;
@@ -311,6 +344,12 @@ export function App() {
     }
   }
 
+  async function cancelTask(id: string) {
+    await fetch(`/api/tasks/${id}/cancel`, { method: "POST" });
+    loadTasks();
+    loadQueueStatus();
+  }
+
   function startFailingSumDemo() {
     setRepo("https://github.com/bezaspace/daybreak-target");
     setBranch("main");
@@ -332,7 +371,13 @@ export function App() {
         <div style={{ color: "#666", fontSize: 14, marginBottom: "1rem" }}>
           Circuit breakers: {config.maxTurns} turns · {config.maxWallClockMinutes} min · ${config.maxCostUsd} ·
           compaction {config.compactionEnabled ? "on" : "off"}
-          {config.e2bTemplate ? ` · template ${config.e2bTemplate}` : ""}
+          {config.e2bTemplate ? ` · template ${config.e2bTemplate}` : ""} · max concurrency {config.maxConcurrentTasks}
+        </div>
+      )}
+      {queueStatus && (
+        <div style={{ color: "#666", fontSize: 14, marginBottom: "1rem" }}>
+          Queue: {queueStatus.pending} pending · {queueStatus.running} running · limit {queueStatus.maxConcurrent} · worker{" "}
+          {queueStatus.workerEnabled ? "on" : "off"}
         </div>
       )}
 
@@ -495,6 +540,11 @@ export function App() {
                   PR
                 </a>
               </span>
+            )}
+            {t.status === "pending" && (
+              <button type="button" onClick={() => cancelTask(t.id)} style={{ marginLeft: 8, padding: "0 0.5rem" }}>
+                Cancel
+              </button>
             )}
           </li>
         ))}

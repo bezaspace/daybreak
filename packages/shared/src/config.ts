@@ -44,6 +44,9 @@ export interface DaybreakConfig {
   maxCiLogBytes: number;
   ciLogContextLines: number;
   healCooldownSeconds: number;
+  maxConcurrentTasks: number;
+  queueWorkerPollMs: number;
+  queueWorkerEnabled: boolean;
 }
 
 const DEFAULT_MAX_TURNS = 40;
@@ -63,6 +66,8 @@ const DEFAULT_MAX_HEAL_ATTEMPTS_PER_PR = 2;
 const DEFAULT_MAX_CI_LOG_BYTES = 524288;
 const DEFAULT_CI_LOG_CONTEXT_LINES = 20;
 const DEFAULT_HEAL_COOLDOWN_SECONDS = 60;
+const DEFAULT_MAX_CONCURRENT_TASKS = 2;
+const DEFAULT_QUEUE_WORKER_POLL_MS = 1000;
 
 export const DEFAULT_DENYLIST_PATTERNS: string[] = [
   ".env",
@@ -186,6 +191,9 @@ export function loadConfig(envPath?: string): DaybreakConfig {
     maxCiLogBytes: parseIntEnv("DAYBREAK_MAX_CI_LOG_BYTES", DEFAULT_MAX_CI_LOG_BYTES),
     ciLogContextLines: parseIntEnv("DAYBREAK_CI_LOG_CONTEXT_LINES", DEFAULT_CI_LOG_CONTEXT_LINES),
     healCooldownSeconds: parseIntEnv("DAYBREAK_HEAL_COOLDOWN_SECONDS", DEFAULT_HEAL_COOLDOWN_SECONDS),
+    maxConcurrentTasks: parseIntEnv("DAYBREAK_MAX_CONCURRENT_TASKS", DEFAULT_MAX_CONCURRENT_TASKS),
+    queueWorkerPollMs: parseIntEnv("DAYBREAK_QUEUE_WORKER_POLL_MS", DEFAULT_QUEUE_WORKER_POLL_MS),
+    queueWorkerEnabled: get("DAYBREAK_QUEUE_WORKER_ENABLED") !== "false",
   };
 }
 

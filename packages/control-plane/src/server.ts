@@ -28,6 +28,7 @@ import {
   type StreamEvent,
 } from "./db.js";
 import { CiLogFetcher, CiLogParser, type CheckRunOutput } from "./ci-logs.js";
+import { TaskQueue, type TaskSpec } from "./queue.js";
 
 const repoRoot = resolve(import.meta.dirname ?? process.cwd(), "../..");
 
@@ -235,32 +236,99 @@ async function isDuplicateDelivery(deliveryId: string): Promise<boolean> {
   }
 }
 
-async function spawnTask(spec: { repo: string; branch: string; prBranch?: string; prompt?: string; triggerSource?: string; githubSender?: string; prNumber?: number; maxTurns?: number; maxCostUsd?: number; maxWallClockMinutes?: number }): Promise<Task> {
-  const { repoWorkspaceId } = await assertCanSpawn(spec.repo, spec.githubSender);
-  const task = taskFrom({ ...spec, status: "running", workspaceId: repoWorkspaceId });
-  tasks.set(task.id, task);
-  await persistTask(task);
+async function executeTask(task: Task): Promise<void> {
+  try {
+    const { repoWorkspaceId } = await assertCanSpawn(task.repo, task.githubSender);
+    task.workspaceId = repoWorkspaceId;
+    await updateTask(task.id, { workspaceId: repoWorkspaceId });
+  } catch (error) {
+    console.error(`[control-plane] task ${task.id} rejected:`, error);
+    task.status = "failed";
+    task.endedAt = Date.now();
+    tasks.set(task.id, task);
+    await updateTask(task.id, { status: "failed", endedAt: task.endedAt });
+    await publishEvent(task.id, "task_failed", { error: error instanceof Error ? error.message : String(error) });
+    return;
+  }
 
-  const taskMaxTurns = spec.maxTurns ?? config.maxTurns;
-  const taskMaxCostUsd = spec.maxCostUsd ?? config.maxCostUsd;
-  const taskMaxWallClockMinutes = spec.maxWallClockMinutes ?? config.maxWallClockMinutes;
+  task.status = "running";
+  task.claimedAt = Date.now();
+  tasks.set(task.id, task);
+  await publishEvent(task.id, "task_start", { repo: task.repo, branch: task.branch, prBranch: task.prBranch, triggerSource: task.triggerSource });
+  await updateTask(task.id, { status: "running", claimedAt: task.claimedAt });
+
+  if (task.triggerSource === "check_run") {
+    await executeHeal(task);
+  } else if (task.triggerSource === "review_comment" || task.triggerSource === "pull_request_review") {
+    await executeReview(task);
+  } else {
+    await executeSpawn(task);
+  }
+}
+
+async function finalizeTask(task: Task, code: number | null, shouldCreatePr: boolean): Promise<void> {
+  await syncEventsFromRedis(task.id);
+
+  try {
+    const redis = getRedis();
+    const raw = await redis.lrange(`daybreak:stream:${task.id}`, 0, -1);
+    const events = raw.map((item) => (typeof item === "string" ? (JSON.parse(item) as StreamEvent) : (item as StreamEvent)));
+
+    const created = events.find((e) => e.type === "sandbox_created");
+    if (created?.data && typeof created.data === "object") {
+      const d = created.data as Record<string, unknown>;
+      const sandboxId = typeof d.sandboxId === "string" ? d.sandboxId : undefined;
+      if (sandboxId) task.sandboxId = sandboxId;
+    }
+    const keepAlive = events.find((e) => e.type === "sandbox_keep_alive");
+    if (keepAlive?.data && typeof keepAlive.data === "object") {
+      const d = keepAlive.data as Record<string, unknown>;
+      const sandboxId = typeof d.sandboxId === "string" ? d.sandboxId : undefined;
+      const keepAliveUntil = typeof d.keepAliveUntil === "number" ? d.keepAliveUntil : undefined;
+      if (sandboxId) task.sandboxId = sandboxId;
+      if (keepAliveUntil) task.keepAliveUntil = keepAliveUntil;
+    }
+
+    const final = events.find((e) => e.type === "task_complete" || e.type === "task_failed");
+    if (final?.data && typeof final.data === "object") {
+      const d = final.data as Record<string, unknown>;
+      const metrics = d.metrics as { estimatedCostUsd?: number } | undefined;
+      task.traceId = typeof d.traceId === "string" ? d.traceId : undefined;
+      task.provider = typeof d.provider === "string" ? d.provider : undefined;
+      task.costUsd = typeof metrics?.estimatedCostUsd === "number" ? metrics.estimatedCostUsd : undefined;
+    }
+  } catch (error) {
+    console.error(`[control-plane] failed to read final event for ${task.id}:`, error);
+  }
+
+  task.endedAt = Date.now();
+  task.exitCode = code ?? undefined;
+  task.status = code === 0 ? "complete" : "failed";
+  tasks.set(task.id, task);
+  await updateTask(task.id, task);
+
+  if (shouldCreatePr && task.status === "complete" && config.githubToken) {
+    const pr = await createPullRequest(task.repo, task.prBranch, task.branch, config.githubToken);
+    if (pr) {
+      task.prUrl = pr.url;
+      task.prNumber = pr.number;
+      tasks.set(task.id, task);
+      await updateTask(task.id, { prUrl: pr.url, prNumber: pr.number });
+      await publishEvent(task.id, "pr_created", { prUrl: pr.url, prNumber: pr.number, prBranch: task.prBranch, baseBranch: task.branch });
+    }
+  }
+}
+
+async function executeSpawn(task: Task): Promise<void> {
+  const taskMaxTurns = task.maxTurns ?? config.maxTurns;
+  const taskMaxCostUsd = task.maxCostUsd ?? config.maxCostUsd;
+  const taskMaxWallClockMinutes = task.maxWallClockMinutes ?? config.maxWallClockMinutes;
 
   const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    E2B_TEMPLATE: config.e2bTemplate || "base",
-    TASK_ID: task.id,
-    PR_BRANCH_NAME: task.prBranch,
-    UPSTASH_REDIS_REST_URL: config.upstashRedisRestUrl || process.env.UPSTASH_REDIS_REST_URL || "",
-    UPSTASH_REDIS_TOKEN: config.upstashRedisToken || process.env.UPSTASH_REDIS_TOKEN || "",
-    LANGFUSE_PUBLIC_KEY: config.langfusePublicKey || process.env.LANGFUSE_PUBLIC_KEY || "",
-    LANGFUSE_SECRET_KEY: config.langfuseSecretKey || process.env.LANGFUSE_SECRET_KEY || "",
-    LANGFUSE_BASE_URL: config.langfuseBaseUrl || process.env.LANGFUSE_BASE_URL || "",
+    ...buildSpawnEnv(task.id, task.prBranch, task.repo, task.branch),
     MAX_TURNS: String(taskMaxTurns),
     MAX_WALL_CLOCK_MINUTES: String(taskMaxWallClockMinutes),
     MAX_COST_USD: String(taskMaxCostUsd),
-    COMPACTION_ENABLED: String(config.compactionEnabled),
-    COMPACTION_RESERVE_TOKENS: String(config.compactionReserveTokens),
-    COMPACTION_KEEP_RECENT_TOKENS: String(config.compactionKeepRecentTokens),
   };
 
   const sandboxArgs = [
@@ -274,9 +342,10 @@ async function spawnTask(spec: { repo: string; branch: string; prBranch?: string
     `--template=${config.e2bTemplate || "base"}`,
     "--keep-alive",
   ];
-  if (spec.prompt) {
-    sandboxArgs.push(`--prompt=${spec.prompt}`);
-    env.TASK_PROMPT = spec.prompt;
+
+  if (task.prompt) {
+    sandboxArgs.push(`--prompt=${task.prompt}`);
+    env.TASK_PROMPT = task.prompt;
   }
 
   ensureLogDir();
@@ -296,63 +365,17 @@ async function spawnTask(spec: { repo: string; branch: string; prBranch?: string
   child.unref();
 
   child.on("exit", async (code) => {
-    if (rewindingTasks.has(task.id)) {
-      console.log(`[control-plane] spawn exit for ${task.id} ignored because a rewind is in progress`);
-      return;
-    }
-    await syncEventsFromRedis(task.id);
-
-    try {
-      const redis = getRedis();
-      const raw = await redis.lrange(`daybreak:stream:${task.id}`, 0, -1);
-      const events = raw.map((item) => (typeof item === "string" ? (JSON.parse(item) as StreamEvent) : (item as StreamEvent)));
-
-      const created = events.find((e) => e.type === "sandbox_created");
-      if (created?.data && typeof created.data === "object") {
-        const d = created.data as Record<string, unknown>;
-        const sandboxId = typeof d.sandboxId === "string" ? d.sandboxId : undefined;
-        if (sandboxId) task.sandboxId = sandboxId;
-      }
-      const keepAlive = events.find((e) => e.type === "sandbox_keep_alive");
-      if (keepAlive?.data && typeof keepAlive.data === "object") {
-        const d = keepAlive.data as Record<string, unknown>;
-        const sandboxId = typeof d.sandboxId === "string" ? d.sandboxId : undefined;
-        const keepAliveUntil = typeof d.keepAliveUntil === "number" ? d.keepAliveUntil : undefined;
-        if (sandboxId) task.sandboxId = sandboxId;
-        if (keepAliveUntil) task.keepAliveUntil = keepAliveUntil;
-      }
-
-      const final = events.find((e) => e.type === "task_complete" || e.type === "task_failed");
-      if (final?.data && typeof final.data === "object") {
-        const d = final.data as Record<string, unknown>;
-        const metrics = d.metrics as { estimatedCostUsd?: number } | undefined;
-        task.traceId = typeof d.traceId === "string" ? d.traceId : undefined;
-        task.provider = typeof d.provider === "string" ? d.provider : undefined;
-        task.costUsd = typeof metrics?.estimatedCostUsd === "number" ? metrics.estimatedCostUsd : undefined;
-      }
-    } catch (error) {
-      console.error(`[control-plane] failed to read final event for ${task.id}:`, error);
-    }
-
-    task.endedAt = Date.now();
-    task.exitCode = code ?? undefined;
-    task.status = code === 0 ? "complete" : "failed";
-    tasks.set(task.id, task);
-    await updateTask(task.id, task);
-
-    if (task.status === "complete" && config.githubToken) {
-      const pr = await createPullRequest(task.repo, task.prBranch, task.branch, config.githubToken);
-      if (pr) {
-        task.prUrl = pr.url;
-        task.prNumber = pr.number;
-        tasks.set(task.id, task);
-        await updateTask(task.id, { prUrl: pr.url, prNumber: pr.number });
-        await publishEvent(task.id, "pr_created", { prUrl: pr.url, prNumber: pr.number, prBranch: task.prBranch, baseBranch: task.branch });
-      }
-    }
+    await finalizeTask(task, code, true);
   });
 
-  return task;
+  child.on("error", async (error) => {
+    console.error(`[control-plane] failed to spawn task ${task.id}:`, error);
+    task.status = "failed";
+    task.endedAt = Date.now();
+    tasks.set(task.id, task);
+    await updateTask(task.id, { status: "failed", endedAt: task.endedAt });
+    await publishEvent(task.id, "task_failed", { error: error.message });
+  });
 }
 
 async function spawnRewind(parent: Task, sandboxId: string, checkpointId: string, prompt: string): Promise<Task> {
@@ -595,14 +618,6 @@ async function spawnFork(
   return child;
 }
 
-async function createPendingTask(spec: { repo: string; branch: string; prBranch: string; prompt?: string; triggerSource: string; githubSender?: string; prNumber?: number; headSha?: string; checkRunId?: string; healAttempt?: number }): Promise<Task> {
-  const task = taskFrom({ ...spec, status: "pending" });
-  tasks.set(task.id, task);
-  await persistTask(task);
-  await publishEvent(task.id, "task_pending", { triggerSource: task.triggerSource, githubSender: task.githubSender, prNumber: task.prNumber, checkRunId: task.checkRunId, headSha: task.headSha });
-  return task;
-}
-
 class TaskRejectedError extends Error {
   status: number;
   constructor(message: string, status: number) {
@@ -772,45 +787,24 @@ function buildSpawnEnv(taskId: string, prBranch: string, repo: string, branch: s
   };
 }
 
-async function runReview(spec: { repo: string; baseBranch: string; headBranch: string; prNumber: number; prompt: string; githubSender?: string }): Promise<Task> {
-  const { repoWorkspaceId } = await assertCanSpawn(spec.repo, spec.githubSender);
-  const repoUrl = spec.repo;
-  const baseRef = spec.baseBranch;
-  const headRef = spec.headBranch;
-  const prNumber = spec.prNumber;
-
-  const originalTask = await findOriginalTask(repoUrl, prNumber, headRef);
-  const taskId = originalTask?.id ?? randomUUID();
-  const prBranch = originalTask?.prBranch ?? headRef;
-
-  let task: Task;
-  if (!originalTask) {
-    task = taskFrom({
-      id: taskId,
-      repo: repoUrl,
-      branch: baseRef,
-      prBranch,
-      prNumber,
-      triggerSource: "review_comment",
-      githubSender: spec.githubSender,
-      prompt: spec.prompt,
-      status: "running",
-      workspaceId: repoWorkspaceId,
-    });
-  } else {
-    task = { ...originalTask, status: "running", prNumber: originalTask.prNumber ?? prNumber, prompt: spec.prompt, workspaceId: repoWorkspaceId };
+async function executeReview(task: Task): Promise<void> {
+  const env = buildSpawnEnv(task.id, task.prBranch, task.repo, task.branch);
+  if (task.prompt) {
+    env.TASK_PROMPT = task.prompt;
   }
-  tasks.set(taskId, task);
-  await persistTask(task);
+  env.REVIEW_MODE = "true";
+  if (task.maxTurns !== undefined) env.MAX_TURNS = String(task.maxTurns);
+  if (task.maxCostUsd !== undefined) env.MAX_COST_USD = String(task.maxCostUsd);
+  if (task.maxWallClockMinutes !== undefined) env.MAX_WALL_CLOCK_MINUTES = String(task.maxWallClockMinutes);
 
   const sandboxArgs = [
     "--filter",
     "agent-runner",
     "sandbox",
-    `--repo=${repoUrl}`,
-    `--branch=${baseRef}`,
-    `--task-id=${taskId}`,
-    `--pr-branch=${prBranch}`,
+    `--repo=${task.repo}`,
+    `--branch=${task.branch}`,
+    `--task-id=${task.id}`,
+    `--pr-branch=${task.prBranch}`,
     `--template=${config.e2bTemplate || "base"}`,
     "--review",
     "--keep-alive",
@@ -819,25 +813,19 @@ async function runReview(spec: { repo: string; baseBranch: string; headBranch: s
   if (task.sandboxId && task.keepAliveUntil && Date.now() < task.keepAliveUntil) {
     sandboxArgs.push(`--connect=${task.sandboxId}`, "--fallback-create");
   }
-  if (spec.prompt) {
-    sandboxArgs.push(`--prompt=${spec.prompt}`);
-  }
-
-  const env = buildSpawnEnv(taskId, prBranch, repoUrl, baseRef);
-  if (spec.prompt) {
-    env.TASK_PROMPT = spec.prompt;
-    env.REVIEW_MODE = "true";
+  if (task.prompt) {
+    sandboxArgs.push(`--prompt=${task.prompt}`);
   }
 
   ensureLogDir();
-  const logPath = getLogPath(taskId);
-  await appendFile(logPath, `[${new Date().toISOString()}] review ${taskId} spawned\n`).catch(() => {});
+  const logPath = getLogPath(task.id);
+  await appendFile(logPath, `[${new Date().toISOString()}] review ${task.id} spawned\n`).catch(() => {});
 
   const child = spawn("pnpm", sandboxArgs, { cwd: repoRoot, env, stdio: ["ignore", "pipe", "pipe"], detached: true });
 
   function forwardLog(chunk: Buffer | string) {
     const text = typeof chunk === "string" ? chunk : chunk.toString();
-    appendLog(taskId, text).catch(() => {});
+    appendLog(task.id, text).catch(() => {});
   }
 
   if (child.stdout) child.stdout.on("data", forwardLog);
@@ -846,17 +834,17 @@ async function runReview(spec: { repo: string; baseBranch: string; headBranch: s
   child.unref();
 
   child.on("exit", async (code) => {
-    await syncEventsFromRedis(taskId);
-    const t = tasks.get(taskId);
-    if (!t) return;
-    t.endedAt = Date.now();
-    t.exitCode = code ?? undefined;
-    t.status = code === 0 ? "complete" : "failed";
-    tasks.set(taskId, t);
-    await updateTask(taskId, t);
+    await finalizeTask(task, code, false);
   });
 
-  return task;
+  child.on("error", async (error) => {
+    console.error(`[control-plane] failed to spawn review ${task.id}:`, error);
+    task.status = "failed";
+    task.endedAt = Date.now();
+    tasks.set(task.id, task);
+    await updateTask(task.id, { status: "failed", endedAt: task.endedAt });
+    await publishEvent(task.id, "task_failed", { error: error.message });
+  });
 }
 
 function buildCiHealPrompt(repoUrl: string, prNumber: number | undefined, headBranch: string, headSha: string, checkName: string, errorContext: string): string {
@@ -939,112 +927,84 @@ async function markCheckRunAsHealed(checkRunId: string, taskId: string) {
   }
 }
 
-async function runHeal(spec: {
-  repo: string;
-  baseBranch: string;
-  headBranch: string;
-  prNumber?: number;
-  headSha?: string;
-  checkRunId?: string;
-  checkSuiteId?: string;
-  checkName?: string;
-  repoFullName?: string;
-  output?: CheckRunOutput;
-  githubSender?: string;
-  healAttempt: number;
-}): Promise<Task> {
-  const { repoWorkspaceId } = await assertCanSpawn(spec.repo, spec.githubSender);
-  const repoUrl = spec.repo;
-  const baseRef = spec.baseBranch;
-  const headRef = spec.headBranch;
-
-  const originalTask = await findOriginalTask(repoUrl, spec.prNumber ?? 0, headRef);
-
+async function buildHealContext(task: Task): Promise<{ prompt: string; annotationsCount: number; logBytes: number; errorContextLength: number }> {
+  const repoUrl = task.repo;
+  const parsed = parseRepo(repoUrl);
+  const metadata = task.metadata ?? {};
   let errorContext = "";
   let logBytes = 0;
   let annotationsCount = 0;
 
-  const parsed = parseRepo(repoUrl);
-  if (parsed && config.githubToken && spec.checkRunId) {
+  if (parsed && config.githubToken && task.checkRunId) {
     try {
       const fetcher = new CiLogFetcher(config.githubToken);
-      const annotations = await fetcher.fetchAnnotations(parsed.owner, parsed.repo, spec.checkRunId);
+      const annotations = await fetcher.fetchAnnotations(parsed.owner, parsed.repo, task.checkRunId);
       annotationsCount = annotations.length;
 
       let logs = "";
       try {
-        logs = await fetcher.fetchJobLogs(parsed.owner, parsed.repo, spec.checkRunId, config.maxCiLogBytes);
+        logs = await fetcher.fetchJobLogs(parsed.owner, parsed.repo, task.checkRunId, config.maxCiLogBytes);
       } catch (logErr) {
-        console.log(`[control-plane] failed to fetch job logs for ${spec.checkRunId}:`, logErr);
+        console.log(`[control-plane] failed to fetch job logs for ${task.checkRunId}:`, logErr);
       }
       logBytes = logs.length;
 
       const parser = new CiLogParser({ contextLines: config.ciLogContextLines });
-      errorContext = parser.parseErrorContext(logs, annotations, spec.output);
+      const output = metadata.output as CheckRunOutput | undefined;
+      errorContext = parser.parseErrorContext(logs, annotations, output);
     } catch (err) {
       console.error("[control-plane] failed to build CI error context:", err);
     }
-  } else if (spec.output) {
+  } else if (metadata.output) {
     const parser = new CiLogParser({ contextLines: config.ciLogContextLines });
-    errorContext = parser.parseErrorContext("", [], spec.output);
+    errorContext = parser.parseErrorContext("", [], metadata.output as CheckRunOutput);
   }
 
-  const prompt = buildCiHealPrompt(repoUrl, spec.prNumber, headRef, spec.headSha || "", spec.checkName || "", errorContext);
+  const prompt = buildCiHealPrompt(repoUrl, task.prNumber, task.prBranch || `daybreak/${task.id}`, task.headSha || "", String(metadata.checkName || ""), errorContext);
+  return { prompt, annotationsCount, logBytes, errorContextLength: errorContext.length };
+}
 
-  const taskId = randomUUID();
-  const prBranch = originalTask?.prBranch ?? headRef;
+async function executeHeal(task: Task): Promise<void> {
+  const { prompt, annotationsCount, logBytes, errorContextLength } = await buildHealContext(task);
+  task.prompt = prompt;
+  await updateTask(task.id, { prompt });
 
-  const task = taskFrom({
-    id: taskId,
-    repo: repoUrl,
-    branch: baseRef,
-    prBranch,
-    prNumber: spec.prNumber,
-    triggerSource: "check_run",
-    githubSender: spec.githubSender,
-    prompt,
-    status: "running",
-    workspaceId: repoWorkspaceId,
-    parentTaskId: originalTask?.id,
-    headSha: spec.headSha,
-    checkRunId: spec.checkRunId,
-    healAttempt: spec.healAttempt,
-  });
-  tasks.set(taskId, task);
-  await persistTask(task);
-
-  if (spec.checkRunId) {
-    await markCheckRunAsHealed(spec.checkRunId, taskId);
-  }
-
-  await publishEvent(taskId, "ci_failure_received", {
-    checkRunId: spec.checkRunId,
-    checkSuiteId: spec.checkSuiteId,
-    checkName: spec.checkName,
-    headBranch: headRef,
-    headSha: spec.headSha,
-    prNumber: spec.prNumber,
-    repo: spec.repoFullName,
-    repoUrl,
-    healAttempt: spec.healAttempt,
+  await publishEvent(task.id, "ci_failure_received", {
+    checkRunId: task.checkRunId,
+    checkSuiteId: task.metadata?.checkSuiteId,
+    checkName: task.metadata?.checkName,
+    headBranch: task.prBranch,
+    headSha: task.headSha,
+    prNumber: task.prNumber,
+    repo: parseRepo(task.repo)?.owner ? `${parseRepo(task.repo)!.owner}/${parseRepo(task.repo)!.repo}` : task.repo,
+    repoUrl: task.repo,
+    healAttempt: task.healAttempt,
   });
 
-  await publishEvent(taskId, "ci_logs_fetched", {
-    checkRunId: spec.checkRunId,
-    headSha: spec.headSha,
+  await publishEvent(task.id, "ci_logs_fetched", {
+    checkRunId: task.checkRunId,
+    headSha: task.headSha,
     annotationsCount,
     logBytes,
-    errorContextLength: errorContext.length,
+    errorContextLength,
   });
+
+  const env = buildSpawnEnv(task.id, task.prBranch, task.repo, task.branch);
+  env.TASK_PROMPT = prompt;
+  env.REVIEW_MODE = "true";
+  env.HEAL_MODE = "true";
+  if (task.maxTurns !== undefined) env.MAX_TURNS = String(task.maxTurns);
+  if (task.maxCostUsd !== undefined) env.MAX_COST_USD = String(task.maxCostUsd);
+  if (task.maxWallClockMinutes !== undefined) env.MAX_WALL_CLOCK_MINUTES = String(task.maxWallClockMinutes);
 
   const sandboxArgs = [
     "--filter",
     "agent-runner",
     "sandbox",
-    `--repo=${repoUrl}`,
-    `--branch=${baseRef}`,
-    `--task-id=${taskId}`,
-    `--pr-branch=${prBranch}`,
+    `--repo=${task.repo}`,
+    `--branch=${task.branch}`,
+    `--task-id=${task.id}`,
+    `--pr-branch=${task.prBranch}`,
     `--template=${config.e2bTemplate || "base"}`,
     "--heal",
     "--keep-alive",
@@ -1057,20 +1017,15 @@ async function runHeal(spec: {
     sandboxArgs.push(`--prompt=${prompt}`);
   }
 
-  const env = buildSpawnEnv(taskId, prBranch, repoUrl, baseRef);
-  env.TASK_PROMPT = prompt;
-  env.REVIEW_MODE = "true";
-  env.HEAL_MODE = "true";
-
   ensureLogDir();
-  const logPath = getLogPath(taskId);
-  await appendFile(logPath, `[${new Date().toISOString()}] heal ${taskId} spawned\n`).catch(() => {});
+  const logPath = getLogPath(task.id);
+  await appendFile(logPath, `[${new Date().toISOString()}] heal ${task.id} spawned\n`).catch(() => {});
 
   const child = spawn("pnpm", sandboxArgs, { cwd: repoRoot, env, stdio: ["ignore", "pipe", "pipe"], detached: true });
 
   function forwardLog(chunk: Buffer | string) {
     const text = typeof chunk === "string" ? chunk : chunk.toString();
-    appendLog(taskId, text).catch(() => {});
+    appendLog(task.id, text).catch(() => {});
   }
 
   if (child.stdout) child.stdout.on("data", forwardLog);
@@ -1079,20 +1034,32 @@ async function runHeal(spec: {
   child.unref();
 
   child.on("exit", async (code) => {
-    await syncEventsFromRedis(taskId);
-    const t = tasks.get(taskId);
-    if (!t) return;
-    t.endedAt = Date.now();
-    t.exitCode = code ?? undefined;
-    t.status = code === 0 ? "complete" : "failed";
-    tasks.set(taskId, t);
-    await updateTask(taskId, t);
+    await finalizeTask(task, code, false);
   });
 
-  return task;
+  child.on("error", async (error) => {
+    console.error(`[control-plane] failed to spawn heal ${task.id}:`, error);
+    task.status = "failed";
+    task.endedAt = Date.now();
+    tasks.set(task.id, task);
+    await updateTask(task.id, { status: "failed", endedAt: task.endedAt });
+    await publishEvent(task.id, "task_failed", { error: error.message });
+  });
 }
 
 const config = loadConfig();
+
+const queue = new TaskQueue({
+  maxConcurrent: config.maxConcurrentTasks,
+  pollMs: config.queueWorkerPollMs,
+  onClaim: executeTask,
+  onEvent: (taskId, type, data) => publishEvent(taskId, type, data),
+  workerId: process.env.HOSTNAME || `worker-${randomUUID().slice(0, 8)}`,
+});
+
+if (config.queueWorkerEnabled && process.env.NODE_ENV !== "test") {
+  queue.start();
+}
 
 const app = new Hono();
 
@@ -1108,6 +1075,8 @@ app.get("/api/config", (c) => {
     compactionEnabled: config.compactionEnabled,
     e2bTemplate: config.e2bTemplate,
     provider: config.llm.provider,
+    maxConcurrentTasks: config.maxConcurrentTasks,
+    queueWorkerEnabled: config.queueWorkerEnabled,
   });
 });
 
@@ -1121,6 +1090,30 @@ app.get("/api/tasks", async (c) => {
     merged.set(task.id, task);
   }
   return c.json(Array.from(merged.values()));
+});
+
+app.get("/api/queue/status", async (c) => {
+  const dbTasks = await getTasks();
+  const merged = new Map<string, Task>();
+  for (const task of dbTasks) {
+    merged.set(task.id, task);
+  }
+  for (const task of tasks.values()) {
+    merged.set(task.id, task);
+  }
+  const all = Array.from(merged.values());
+  const pending = all.filter((t) => t.status === "pending").length;
+  const running = all.filter((t) => t.status === "running").length;
+  const queueStatus = queue.getStatus();
+  return c.json({
+    pending,
+    running,
+    maxConcurrent: config.maxConcurrentTasks,
+    workerEnabled: config.queueWorkerEnabled,
+    workerPollMs: config.queueWorkerPollMs,
+    workerPending: queueStatus.pending,
+    workerRunning: queueStatus.running,
+  });
 });
 
 app.post("/api/tasks", async (c) => {
@@ -1141,7 +1134,7 @@ app.post("/api/tasks", async (c) => {
   }
 
   try {
-    const task = await spawnTask({
+    const task = await queue.enqueue({
       repo,
       branch,
       prompt,
@@ -1150,7 +1143,7 @@ app.post("/api/tasks", async (c) => {
       maxCostUsd: body.maxCostUsd,
       maxWallClockMinutes: body.maxWallClockMinutes,
     });
-    return c.json({ taskId: task.id, repo, branch, status: task.status });
+    return c.json({ taskId: task.id, repo, branch, status: task.status }, 202);
   } catch (error) {
     if (error instanceof TaskRejectedError) {
       return c.json({ error: error.message }, error.status as 403 | 429 | 500);
@@ -1298,20 +1291,26 @@ app.post(
 
         const healAttempt = (await countHealAttempts(repoUrl, prNumber, headBranch)) + 1;
 
-        const task = await runHeal({
+        const task = await queue.enqueue({
           repo: repoUrl,
-          baseBranch,
-          headBranch,
+          branch: baseBranch,
+          prBranch: originalTask?.prBranch ?? headBranch,
+          triggerSource: "check_run",
+          githubSender: typeof sender === "string" ? sender : undefined,
           prNumber,
           headSha,
           checkRunId,
           checkSuiteId,
           checkName,
-          repoFullName,
-          output: checkRunOutput,
-          githubSender: typeof sender === "string" ? sender : undefined,
+          output: checkRunOutput as Record<string, unknown>,
           healAttempt,
+          parentTaskId: originalTask?.id,
+          metadata: { checkSuiteId, checkName, output: checkRunOutput as Record<string, unknown> },
         });
+
+        if (checkRunId) {
+          await markCheckRunAsHealed(checkRunId, task.id);
+        }
 
         return c.json({ taskId: task.id, repo: repoFullName, branch: baseBranch, prBranch: headBranch, headSha, status: task.status }, 202);
       }
@@ -1337,7 +1336,7 @@ app.post(
         const issueBody = typeof issue.body === "string" ? issue.body : "";
         const issuePrBranch = `daybreak/${randomUUID()}`;
         const prompt = buildIssuePrompt(repoUrl, defaultBranch, issuePrBranch, { title: issueTitle, body: issueBody }, stripMention(commentBody));
-        const task = await spawnTask({ repo: repoUrl, branch: defaultBranch, prBranch: issuePrBranch, prompt, triggerSource: "issue_comment", githubSender: typeof sender === "string" ? sender : undefined });
+        const task = await queue.enqueue({ repo: repoUrl, branch: defaultBranch, prBranch: issuePrBranch, prompt, triggerSource: "issue_comment", githubSender: typeof sender === "string" ? sender : undefined });
         return c.json({ taskId: task.id, repo: repoFullName, branch: defaultBranch, status: task.status }, 202);
       }
       case "pull_request_review_comment": {
@@ -1360,8 +1359,21 @@ app.post(
         const headRef = typeof head?.ref === "string" ? head.ref : `daybreak/${randomUUID()}`;
         const prNumber = typeof pullRequest.number === "number" ? pullRequest.number : 0;
         const prompt = buildReviewPrompt(repoUrl, prNumber, baseRef, headRef, stripMention(commentBody));
-        const task = await runReview({ repo: repoUrl, baseBranch: baseRef, headBranch: headRef, prNumber, prompt, githubSender: typeof sender === "string" ? sender : undefined });
-        return c.json({ taskId: task.id, repo: repoFullName, branch: baseRef, prBranch: headRef, status: task.status }, 202);
+        const reviewOriginalTask = await findOriginalTask(repoUrl, prNumber, headRef);
+        const prBranch = reviewOriginalTask?.prBranch ?? headRef;
+        const task = await queue.enqueue({
+          repo: repoUrl,
+          branch: baseRef,
+          prBranch,
+          prompt,
+          triggerSource: "review_comment",
+          githubSender: typeof sender === "string" ? sender : undefined,
+          prNumber,
+          sandboxId: reviewOriginalTask?.sandboxId,
+          keepAliveUntil: reviewOriginalTask?.keepAliveUntil,
+          parentTaskId: reviewOriginalTask?.id,
+        });
+        return c.json({ taskId: task.id, repo: repoFullName, branch: baseRef, prBranch, status: task.status }, 202);
       }
       case "pull_request_review": {
         const action = typeof payload.action === "string" ? payload.action : "";
@@ -1383,8 +1395,21 @@ app.post(
         const headRef = typeof head?.ref === "string" ? head.ref : `daybreak/${randomUUID()}`;
         const prNumber = typeof pullRequest.number === "number" ? pullRequest.number : 0;
         const prompt = buildReviewPrompt(repoUrl, prNumber, baseRef, headRef, stripMention(reviewBody));
-        const task = await runReview({ repo: repoUrl, baseBranch: baseRef, headBranch: headRef, prNumber, prompt, githubSender: typeof sender === "string" ? sender : undefined });
-        return c.json({ taskId: task.id, repo: repoFullName, branch: baseRef, prBranch: headRef, status: task.status }, 202);
+        const prReviewOriginalTask = await findOriginalTask(repoUrl, prNumber, headRef);
+        const prBranch = prReviewOriginalTask?.prBranch ?? headRef;
+        const task = await queue.enqueue({
+          repo: repoUrl,
+          branch: baseRef,
+          prBranch,
+          prompt,
+          triggerSource: "pull_request_review",
+          githubSender: typeof sender === "string" ? sender : undefined,
+          prNumber,
+          sandboxId: prReviewOriginalTask?.sandboxId,
+          keepAliveUntil: prReviewOriginalTask?.keepAliveUntil,
+          parentTaskId: prReviewOriginalTask?.id,
+        });
+        return c.json({ taskId: task.id, repo: repoFullName, branch: baseRef, prBranch, status: task.status }, 202);
       }
       default: {
         return c.json({ ok: true, note: `unhandled event: ${event}` }, 200);
@@ -1486,12 +1511,31 @@ app.post("/api/tasks/:id/rewind", async (c) => {
   return c.json({ taskId: task.id, checkpointId, status: task.status }, 202);
 });
 
+app.post("/api/tasks/:id/cancel", async (c) => {
+  const id = c.req.param("id");
+  const task = tasks.get(id) ?? (await getTask(id));
+  if (!task) return c.json({ error: "task not found" }, 404);
+  if (task.status !== "pending") {
+    return c.json({ error: "only pending tasks can be cancelled" }, 400);
+  }
+  queue.cancel(id);
+  task.status = "cancelled";
+  task.endedAt = Date.now();
+  tasks.set(task.id, task);
+  await updateTask(id, { status: "cancelled", endedAt: task.endedAt });
+  await publishEvent(id, "task_cancelled", { reason: "user requested cancel" });
+  return c.json({ taskId: id, status: "cancelled" }, 202);
+});
+
 app.post("/api/tasks/:id/abandon", async (c) => {
   const id = c.req.param("id");
   const task = tasks.get(id) ?? (await getTask(id));
   if (!task) return c.json({ error: "task not found" }, 404);
-  if (task.status === "complete" || task.status === "failed" || task.status === "abandoned" || task.status === "promoted") {
+  if (task.status === "complete" || task.status === "failed" || task.status === "abandoned" || task.status === "promoted" || task.status === "cancelled") {
     return c.json({ error: "task is already finished" }, 400);
+  }
+  if (task.status === "pending") {
+    queue.cancel(id);
   }
   await abandonTask(task);
   return c.json({ taskId: task.id, status: task.status }, 202);

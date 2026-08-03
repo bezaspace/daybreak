@@ -19,6 +19,9 @@ const config: DaybreakConfig = {
   maxCiLogBytes: 524288,
   ciLogContextLines: 20,
   healCooldownSeconds: 60,
+  maxConcurrentTasks: 2,
+  queueWorkerPollMs: 1000,
+  queueWorkerEnabled: true,
 };
 
 describe("isSensitivePath", () => {

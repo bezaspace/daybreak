@@ -29,6 +29,9 @@ export interface PersistedTask {
   head_sha?: string | null;
   check_run_id?: string | null;
   heal_attempt?: number | null;
+  claimed_at?: string | null;
+  worker_id?: string | null;
+  metadata?: unknown | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -48,7 +51,7 @@ export interface Task {
   repo: string;
   branch: string;
   prBranch: string;
-  status: "pending" | "running" | "complete" | "failed" | "abandoned" | "promoted";
+  status: "pending" | "running" | "complete" | "failed" | "abandoned" | "promoted" | "cancelled";
   startedAt: number;
   endedAt?: number;
   exitCode?: number;
@@ -70,6 +73,12 @@ export interface Task {
   headSha?: string;
   checkRunId?: string;
   healAttempt?: number;
+  claimedAt?: number;
+  workerId?: string;
+  metadata?: Record<string, unknown>;
+  maxTurns?: number;
+  maxCostUsd?: number;
+  maxWallClockMinutes?: number;
 }
 
 export interface PersistedWorkspace {
@@ -98,7 +107,7 @@ export interface StreamEvent {
   data: unknown;
 }
 
-function getSupabase(): SupabaseClient | undefined {
+export function getSupabase(): SupabaseClient | undefined {
   const config = loadConfig();
   if (!config.supabaseUrl || !config.supabaseServiceKey) return undefined;
   try {
@@ -139,6 +148,9 @@ function toTask(row: PersistedTask): Task {
     headSha: row.head_sha ?? undefined,
     checkRunId: row.check_run_id ?? undefined,
     healAttempt: row.heal_attempt ?? undefined,
+    claimedAt: row.claimed_at ? new Date(row.claimed_at).getTime() : undefined,
+    workerId: row.worker_id ?? undefined,
+    metadata: (row.metadata as Record<string, unknown>) ?? undefined,
   };
 }
 
@@ -172,6 +184,9 @@ export async function persistTask(task: Task): Promise<boolean> {
     head_sha: task.headSha ?? null,
     check_run_id: task.checkRunId ?? null,
     heal_attempt: task.healAttempt ?? null,
+    claimed_at: task.claimedAt ? new Date(task.claimedAt).toISOString() : null,
+    worker_id: task.workerId ?? null,
+    metadata: task.metadata ?? null,
     updated_at: new Date().toISOString(),
   });
   if (error) {
@@ -200,6 +215,9 @@ export async function updateTask(id: string, updates: Partial<Task>): Promise<bo
   if (updates.headSha !== undefined) payload.head_sha = updates.headSha ?? null;
   if (updates.checkRunId !== undefined) payload.check_run_id = updates.checkRunId ?? null;
   if (updates.healAttempt !== undefined) payload.heal_attempt = updates.healAttempt ?? null;
+  if (updates.claimedAt !== undefined) payload.claimed_at = updates.claimedAt ? new Date(updates.claimedAt).toISOString() : null;
+  if (updates.workerId !== undefined) payload.worker_id = updates.workerId ?? null;
+  if (updates.metadata !== undefined) payload.metadata = updates.metadata ?? null;
   const { error } = await supabase.from("tasks").update(payload).eq("id", id);
   if (error) {
     console.error("[db] updateTask error:", error.message);
@@ -236,6 +254,18 @@ export async function getTask(id: string): Promise<Task | undefined> {
     return undefined;
   }
   return toTask(data);
+}
+
+export async function claimNextPendingTask(maxConcurrent: number, workerId?: string): Promise<Task | undefined> {
+  const supabase = getSupabase();
+  if (!supabase) return undefined;
+  const { data, error } = await supabase.rpc("claim_next_pending_task", { max_concurrent: maxConcurrent, worker_id: workerId ?? null });
+  if (error) {
+    console.error("[db] claimNextPendingTask error:", error.message);
+    return undefined;
+  }
+  if (!data || !Array.isArray(data) || data.length === 0) return undefined;
+  return toTask(data[0] as PersistedTask);
 }
 
 function toWorkspace(row: PersistedWorkspace): Workspace {
