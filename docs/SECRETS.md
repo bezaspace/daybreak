@@ -53,7 +53,7 @@ Copy the tunnel URL (e.g. `https://<random>.trycloudflare.com`) and add it as a 
 - `SUPABASE_SERVICE_KEY` is high-sensitivity and is used by the control plane to persist tasks and events.
 - Langfuse keys (`LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`) are lower risk but still kept out of source control.
 
-## Phase 6 runtime configuration (M1-M7)
+## Phase 6 runtime configuration (M1-M9)
 
 These values are not secrets but are documented here because they are tenant- and quota-sensitive:
 
@@ -68,6 +68,12 @@ These values are not secrets but are documented here because they are tenant- an
 - `DAYBREAK_SANDBOX_IDLE_TTL_MINUTES` — default `15`; grace period before an idle or terminal sandbox is killed.
 - `DAYBREAK_DATA_RETENTION_DAYS` — default `30`; old `session_snapshots` and active checkpoints are pruned after this.
 - `DAYBREAK_CLEANUP_ENABLED` — default `true`; set to `false` to disable the background cleanup interval.
+- `DAYBREAK_MAX_FILE_READ_BYTES` — default `200000`; hard cap on `read`/`write`/`edit` target file bytes.
+- `DAYBREAK_MAX_FILE_READ_LINES` — default `5000`; hard cap on `read`/`write`/`edit` target file line count.
+- `DAYBREAK_MAX_REPO_CLONE_DEPTH` — default `0`; set to `>0` to clone repos with `--depth N`.
+- `DAYBREAK_PROVIDER_FAILURE_THRESHOLD` — default `3`; consecutive 5xx/429 errors before fail-fast to fallback.
+- `DAYBREAK_COMPACTION_RESERVE_TOKENS` — default `4000`; token headroom before `compaction_advised` is emitted.
+- `DAYBREAK_COMPACTION_KEEP_RECENT_TOKENS` — default `8000`; recent messages preserved during Pi compaction.
 
 ### Tenant headers
 

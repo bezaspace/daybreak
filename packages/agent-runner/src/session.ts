@@ -23,7 +23,9 @@ type TaskRewindEvent = { type: "task_rewind"; checkpointId: string; prompt: stri
 type BranchForkedEvent = { type: "branch_forked"; checkpointId: string; prompt: string; parentTaskId: string };
 type CircuitBreakerEvent = { type: "circuit_breaker_triggered"; reason: string; limit: number; current: number };
 type CostAlertEvent = { type: "cost_alert"; threshold: number; limit: number; current: number };
-export type TaskEvent = AgentSessionEvent | ProviderSwitchEvent | FallbackAppliedEvent | CheckpointCreatedEvent | CheckpointRestoredEvent | TaskRewindEvent | BranchForkedEvent | CircuitBreakerEvent | CostAlertEvent;
+type FileTooLargeEvent = { type: "file_too_large"; path: string; size?: number; maxBytes: number; maxLines: number; reason: string };
+type CompactionAdvisedEvent = { type: "compaction_advised"; tokens: number; contextWindow: number; reserveTokens: number };
+export type TaskEvent = AgentSessionEvent | ProviderSwitchEvent | FallbackAppliedEvent | CheckpointCreatedEvent | CheckpointRestoredEvent | TaskRewindEvent | BranchForkedEvent | CircuitBreakerEvent | CostAlertEvent | FileTooLargeEvent | CompactionAdvisedEvent;
 
 export interface RunOptions {
   prompt: string;
@@ -35,6 +37,8 @@ export interface RunOptions {
   taskId?: string;
   checkpoint?: Checkpoint;
   isFork?: boolean;
+  compactionReserveTokens?: number;
+  compactionKeepRecentTokens?: number;
 }
 
 export class TaskRunner {
@@ -102,6 +106,7 @@ export class TaskRunner {
         },
       },
       this.config.llmPricing,
+      this.config.providerFailureThreshold,
     );
 
     const taskId = this.taskId ?? randomUUID();
@@ -120,12 +125,14 @@ export class TaskRunner {
       supabaseServiceKey: useSupabase ? this.config.supabaseServiceKey : undefined,
     });
 
+    const reserveTokens = options.compactionReserveTokens ?? this.config.compactionReserveTokens;
+    const keepRecentTokens = options.compactionKeepRecentTokens ?? this.config.compactionKeepRecentTokens;
     const settingsManager = SettingsManager.inMemory(
       {
         compaction: {
           enabled: this.config.compactionEnabled,
-          reserveTokens: this.config.compactionReserveTokens,
-          keepRecentTokens: this.config.compactionKeepRecentTokens,
+          reserveTokens,
+          keepRecentTokens,
         },
         defaultProjectTrust: "always",
       },
@@ -238,6 +245,10 @@ export class TaskRunner {
       if (!check.allowed) {
         console.error(pc.red(`[safety block] ${toolCall.name}: ${check.reason}`));
         this.metrics.blockToolCall(toolCall.id, check.reason ?? "safety");
+        if (check.code === "file_too_large") {
+          const path = this.safety.extractPath(args) ?? "unknown";
+          this.onEvent?.({ type: "file_too_large", path, maxBytes: this.config.maxFileReadBytes, maxLines: this.config.maxFileReadLines, reason: check.reason ?? "file too large" });
+        }
         return { block: true, reason: check.reason };
       }
       return {};
@@ -270,6 +281,8 @@ export class TaskRunner {
             this.costAlertSent = true;
             this.onEvent?.({ type: "cost_alert", threshold: this.config.costAlertThreshold, limit: this.config.maxCostUsd, current: current.estimatedCostUsd });
           }
+
+          this.checkCompaction().catch(() => {});
 
           this.lastToolCallId = undefined;
 
@@ -501,6 +514,25 @@ export class TaskRunner {
       this.rootSpan.setAttribute("task.status", this.abortedReason ? "aborted" : "complete");
       this.rootSpan.end();
       this.rootSpan = undefined;
+    }
+  }
+
+  private async checkCompaction(): Promise<void> {
+    const session = this.session;
+    if (!session || !this.config.compactionEnabled) return;
+
+    const usage = session.getContextUsage?.();
+    if (!usage || usage.tokens == null || usage.contextWindow <= 0) return;
+
+    const reserveTokens = this.config.compactionReserveTokens;
+    const threshold = Math.max(0, usage.contextWindow - reserveTokens);
+    if (usage.tokens >= threshold) {
+      this.onEvent?.({ type: "compaction_advised", tokens: usage.tokens, contextWindow: usage.contextWindow, reserveTokens });
+      try {
+        await session.compact?.();
+      } catch {
+        // Pi handles compaction internally; emitting compaction_advised is enough.
+      }
     }
   }
 

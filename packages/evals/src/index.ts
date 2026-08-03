@@ -6,6 +6,7 @@ import { readdir, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runCiSelfHeal } from "./ci-self-heal.js";
+import { runResilienceChecks } from "./resilience.js";
 
 interface TraceInfo {
   id: string;
@@ -60,16 +61,34 @@ async function main() {
     return;
   }
 
+  console.log(pc.bold("Running resilience fixtures...\n"));
+  const resilience = await runResilienceChecks();
+  for (const result of resilience.results) {
+    if (result.ok) {
+      console.log(pc.green(`  ✓ ${result.name}`));
+    } else {
+      console.log(pc.red(`  ✗ ${result.name}: ${result.error}`));
+    }
+  }
+  console.log(pc.bold(`\nResilience: ${resilience.passed} passed, ${resilience.failed} failed\n`));
+
   const fixtures = await loadFixtures();
 
   if (fixtures.length === 0) {
-    console.log(pc.yellow("No fixtures found. Add one to fixtures/ and rerun."));
-    process.exit(0);
+    console.log(pc.yellow("No LLM fixtures found. Add one to fixtures/ and rerun."));
+    process.exitCode = resilience.failed > 0 ? 1 : 0;
+    return;
+  }
+
+  if (!config.llm.apiKey && !process.env.LLM_API_KEY) {
+    console.log(pc.yellow("LLM_API_KEY is not set; skipping LLM fixture evals."));
+    process.exitCode = resilience.failed > 0 ? 1 : 0;
+    return;
   }
 
   console.log(pc.bold(`Running ${fixtures.length} eval case(s)...\n`));
-  let passed = 0;
-  let failed = 0;
+  let passed = resilience.passed;
+  let failed = resilience.failed;
 
   for (const evalCase of fixtures) {
     console.log(pc.bold(`--- ${evalCase.name} ---`));
@@ -153,7 +172,7 @@ async function main() {
   console.log(pc.bold("=== Eval summary ==="));
   console.log(pc.green(`Passed: ${passed}`));
   console.log(pc.red(`Failed: ${failed}`));
-  process.exit(failed > 0 ? 1 : 0);
+  process.exitCode = failed > 0 ? 1 : 0;
 }
 
 main().catch((error) => {

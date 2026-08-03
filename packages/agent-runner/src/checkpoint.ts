@@ -122,6 +122,11 @@ export class CheckpointStore {
     const tag = `daybreak/checkpoint/${taskId}/${turn}`;
 
     try {
+      if (!existsSync(join(cwd, ".git"))) {
+        runGit(cwd, "init");
+        runGit(cwd, 'config user.name "Daybreak Bot"');
+        runGit(cwd, 'config user.email "daybreak@example.com"');
+      }
       runGit(cwd, "add -A");
       runGit(cwd, `commit --allow-empty --no-verify -m "${message.replace(/"/g, '\\"')}"`);
       const commit = runGit(cwd, "rev-parse HEAD");

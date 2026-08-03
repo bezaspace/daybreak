@@ -8,6 +8,34 @@
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts"
+    },
+    "./queue": {
+      "types": "./src/queue.ts",
+      "import": "./src/queue.ts"
+    },
+    "./idempotency": {
+      "types": "./src/idempotency.ts",
+      "import": "./src/idempotency.ts"
+    },
+    "./retry": {
+      "types": "./src/retry.ts",
+      "import": "./src/retry.ts"
+    },
+    "./tenants": {
+      "types": "./src/tenants.ts",
+      "import": "./src/tenants.ts"
+    },
+    "./budgets": {
+      "types": "./src/budgets.ts",
+      "import": "./src/budgets.ts"
+    },
+    "./cleanup": {
+      "types": "./src/cleanup.ts",
+      "import": "./src/cleanup.ts"
+    },
+    "./errors": {
+      "types": "./src/errors.ts",
+      "import": "./src/errors.ts"
     }
   },
   "scripts": {

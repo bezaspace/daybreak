@@ -198,3 +198,37 @@ These are intentionally tight. Raise them only after measuring real usage in you
 | Idle sandbox cleanup | kills after keep-alive expires or terminal | ~$0.00084/min saved | `DAYBREAK_SANDBOX_IDLE_TTL_MINUTES` |
 | Old session snapshots | deleted after 30 days | frees Supabase storage | `DAYBREAK_DATA_RETENTION_DAYS` |
 | Cleanup audit log | one row per cleanup run | negligible | `DAYBREAK_CLEANUP_ENABLED` |
+
+## Phase 6 M8 — Compaction and large-repo resilience cost impact
+
+### File-size and line-count limits
+
+- `DAYBREAK_MAX_FILE_READ_BYTES` (default 200 KB) and `DAYBREAK_MAX_FILE_READ_LINES` (default 5,000) prevent the agent from reading multi-megabyte generated files or minified bundles into the LLM context. A blocked read returns a `file_too_large` event instead of burning tokens on irrelevant content.
+- This saves prompt/completion tokens on repos with large artifacts (`node_modules`, build output, lockfiles) and avoids context-window exhaustion that would force an early, expensive compaction.
+
+### Shallow clone savings
+
+- `DAYBREAK_MAX_REPO_CLONE_DEPTH` (default `0`, full clone) can be set to `1` for known shallow-clone-safe repos. A depth-1 clone fetches only the latest commit, reducing clone time and E2B egress/storage.
+- Use shallow clones only when the repository does not need full history for tests or when the eval fixture has been verified with that depth.
+
+### Provider fail-fast
+
+- `DAYBREAK_PROVIDER_FAILURE_THRESHOLD` (default `3`) counts consecutive 5xx/429 errors from the primary provider and immediately switches to the fallback. This avoids waiting for repeated timeouts, reducing per-task wall-clock time and E2B compute charges.
+- Fallback turns are billed at the fallback model rate, so keep both primary and fallback cheap (`gpt-4o-mini` or free tiers) for eval work.
+
+### Compaction tuning
+
+- `DAYBREAK_COMPACTION_RESERVE_TOKENS` and `DAYBREAK_COMPACTION_KEEP_RECENT_TOKENS` control Pi context compaction. Per-task overrides can be passed in `POST /api/tasks` for long tasks that need a larger reserve or smaller recent window.
+- A compaction round adds a summarization LLM call (~8K input + 2K output tokens on a 32K context, ~$0.006 at `gpt-4o-mini` rates). Set `MAX_COST_USD` higher than the default $0.50 when compaction is expected.
+
+## Phase 6 M9 — Eval and verification cost
+
+### Resilience eval fixtures
+
+- `packages/evals/src/resilience.ts` exercises the control-plane queue, idempotency, retry, tenant rate limits, security blocks, circuit-breaker metrics, and branch cleanup in a single in-memory run. It does not spawn E2B sandboxes or call LLMs, so it is free to run in CI.
+- `pnpm eval` now runs the resilience fixtures first, then the LLM fixture suite (`failing-sum`) when `LLM_API_KEY` is configured.
+
+### Budget impact of verification
+
+- Running `pnpm eval` with an LLM against `failing-sum` costs the same as a short fix task (~$0.00 on free providers, ~$0.01–$0.05 on paid small models). The `MAX_TURNS`/`MAX_COST_USD` circuit breakers bound each fixture.
+- The resilience checks run deterministically without external credentials, giving fast, zero-cost regression coverage for Phase 6 behavior before any paid resources are consumed.

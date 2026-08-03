@@ -31,6 +31,10 @@ const config: DaybreakConfig = {
   sandboxIdleTtlMinutes: 15,
   dataRetentionDays: 30,
   cleanupEnabled: true,
+  maxFileReadBytes: 200_000,
+  maxFileReadLines: 5_000,
+  maxRepoCloneDepth: 0,
+  providerFailureThreshold: 3,
 };
 
 describe("isSensitivePath", () => {

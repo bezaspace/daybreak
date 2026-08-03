@@ -1,9 +1,11 @@
+import { statSync, readFileSync } from "node:fs";
 import type { DaybreakConfig } from "./config.js";
 import { isSensitivePath, sanitizePath } from "./security.js";
 
 export interface SafetyCheck {
   allowed: boolean;
   reason?: string;
+  code?: string;
 }
 
 export function isProtectedBranch(branch: string, protectedBranches: string[]): boolean {
@@ -152,6 +154,11 @@ export class SafetyMiddleware {
           reason: `Path '${path}' matches the sensitive-file denylist`,
         };
       }
+
+      if (["read", "write", "edit"].includes(toolName)) {
+        const sizeCheck = this.checkFileSize(sanitized.path);
+        if (!sizeCheck.allowed) return sizeCheck;
+      }
     }
 
     if (toolName === "bash") {
@@ -196,12 +203,40 @@ export class SafetyMiddleware {
     return patterns.some((re) => re.test(command));
   }
 
-  private extractPath(args: unknown): string | undefined {
+  extractPath(args: unknown): string | undefined {
     const keys = ["path", "file_path", "target_path", "new_path", "old_path"];
     for (const key of keys) {
       const value = extractString(args, key);
       if (value) return value;
     }
     return undefined;
+  }
+
+  private checkFileSize(absPath: string): SafetyCheck {
+    try {
+      const stats = statSync(absPath);
+      if (!stats.isFile()) return { allowed: true };
+
+      if (stats.size > this.config.maxFileReadBytes) {
+        return {
+          allowed: false,
+          reason: `File too large: ${stats.size} bytes exceeds max ${this.config.maxFileReadBytes}`,
+          code: "file_too_large",
+        };
+      }
+
+      const content = readFileSync(absPath, "utf8");
+      const lines = content.split("\n").length;
+      if (lines > this.config.maxFileReadLines) {
+        return {
+          allowed: false,
+          reason: `File too many lines: ${lines} exceeds max ${this.config.maxFileReadLines}`,
+          code: "file_too_large",
+        };
+      }
+    } catch {
+      // File may not exist yet (e.g. a write of a new file); allow the tool call.
+    }
+    return { allowed: true };
   }
 }

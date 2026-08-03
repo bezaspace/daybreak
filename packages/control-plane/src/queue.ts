@@ -28,6 +28,8 @@ export interface TaskSpec {
   maxTurns?: number;
   maxCostUsd?: number;
   maxWallClockMinutes?: number;
+  compactionReserveTokens?: number;
+  compactionKeepRecentTokens?: number;
   metadata?: Record<string, unknown>;
   idempotencyKey?: string;
   retryCount?: number;
@@ -73,6 +75,8 @@ function buildTask(spec: TaskSpec): Task {
     maxTurns: spec.maxTurns,
     maxCostUsd: spec.maxCostUsd,
     maxWallClockMinutes: spec.maxWallClockMinutes,
+    compactionReserveTokens: spec.compactionReserveTokens,
+    compactionKeepRecentTokens: spec.compactionKeepRecentTokens,
     metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
     idempotencyKey: spec.idempotencyKey,
     retryCount: spec.retryCount ?? 0,

@@ -2,7 +2,7 @@
 
 **A living log of the architectural, product, and sequencing decisions behind the Daybreak roadmap.**
 
-> **Status:** Updated through Phase 6 M7 (M8-M9 pending).  
+> **Status:** Updated through Phase 6 M9 (complete).  
 > **Started:** 2026-08-01
 
 ---
@@ -487,6 +487,22 @@
 - Sandbox cleanup kills any `running` task whose `keep_alive_until` is in the past and any terminal task that still has a `sandbox_id`.
 - Data retention marks old `checkpoints` as `abandoned` and deletes old `session_snapshots` rows, reducing Supabase storage growth.
 - `cleanup_runs` records `type`, `started_at`, `completed_at`, `details`, and `deleted_count` for observability.
+
+---
+
+## D41. Phase 6 M8/M9 final polish (compaction, large-repo limits, provider fail-fast, resilience evals)
+
+**Decision:** Cap file reads by bytes and lines in `SafetyMiddleware`, allow shallow clones via `DAYBREAK_MAX_REPO_CLONE_DEPTH`, tune Pi context compaction through centralized config plus per-task `POST /api/tasks` overrides, fail-fast to the fallback provider after a configurable streak of 5xx/429 errors, and verify all of these with a deterministic, in-memory `resilience.ts` eval that runs under `pnpm eval`.
+
+**Rationale:** Long tasks on large repos risk context-window exhaustion, oversized file reads, and provider timeout cascades. Bounding file reads prevents multi-megabyte artifacts from entering the LLM context. Shallow clones reduce clone time and storage for history-irrelevant evals. Compaction tuning keeps long conversations within the model window. Provider fail-fast avoids burning E2B runtime while the primary provider is unhealthy. A zero-external-dependency resilience eval gives fast CI feedback on queue, idempotency, retry, tenant quotas, security, circuit-breaker, and cleanup behavior.
+
+**Consequences:**
+- `SafetyMiddleware` checks `stats.size` and line count for `read`/`write`/`edit`, emitting `file_too_large` when `DAYBREAK_MAX_FILE_READ_BYTES` or `DAYBREAK_MAX_FILE_READ_LINES` is exceeded.
+- `packages/agent-runner/src/run-task.ts` passes `--depth N` to `git clone` when `DAYBREAK_MAX_REPO_CLONE_DEPTH > 0`.
+- `DAYBREAK_COMPACTION_RESERVE_TOKENS` and `DAYBREAK_COMPACTION_KEEP_RECENT_TOKENS` are read from `loadConfig()` and can be overridden per task; `TaskRunner` emits `compaction_advised` (and calls `session.compact()` if available) when `contextWindow - reserveTokens` is crossed.
+- `createModelRuntime` tracks consecutive primary-provider retryable failures; after `DAYBREAK_PROVIDER_FAILURE_THRESHOLD` it immediately tries the fallback instead of waiting for each call to time out.
+- `packages/evals/src/resilience.ts` runs against in-memory control-plane modules by emptying `SUPABASE_URL`/`SUPABASE_SERVICE_KEY`/`UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_TOKEN` at module load, so `pnpm eval` can validate Phase 6 behavior without live credentials. `packages/evals/src/index.ts` runs the resilience checks first and skips LLM fixtures when `LLM_API_KEY` is not configured.
+- `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm --filter agent-runner build:bundle`, and `pnpm --filter ui build` all pass. The `failing-sum` LLM fixture remains available for `pnpm eval` and `pnpm eval:e2e` when a key is present.
 
 ---
 

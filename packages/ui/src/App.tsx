@@ -114,9 +114,17 @@ function formatEvent(event: StreamEvent): string {
     const data = event.data as { reason?: string };
     return `[${time}] compaction_start: ${data.reason || ""}`;
   }
+  if (event.type === "compaction_advised") {
+    const data = event.data as { tokens?: number; contextWindow?: number; reserveTokens?: number };
+    return `[${time}] compaction_advised: ${data.tokens ?? "-"} / ${data.contextWindow ?? "-"} tokens (reserve ${data.reserveTokens ?? "-"})`;
+  }
   if (event.type === "compaction_end") {
     const data = event.data as { aborted?: boolean; tokensBefore?: number; firstKeptEntryId?: string };
     return `[${time}] compaction_end: ${data.aborted ? "aborted" : `tokensBefore=${data.tokensBefore}, firstKept=${data.firstKeptEntryId}`}`;
+  }
+  if (event.type === "file_too_large") {
+    const data = event.data as { path?: string; size?: number; maxBytes?: number; maxLines?: number; reason?: string };
+    return `[${time}] file_too_large: ${data.path ?? "-"} ${data.reason ?? ""} (max ${data.maxBytes ?? "-"}B / ${data.maxLines ?? "-"} lines)`;
   }
   if (event.type === "provider_switched" || event.type === "fallback_applied") {
     const data = event.data as { from?: string; to?: string; reason?: string; modelId?: string };

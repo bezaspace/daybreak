@@ -35,6 +35,26 @@ export interface CreateModelRuntimeResult {
   model: Model<"openai-completions">;
 }
 
+interface TryProviderResult {
+  message?: AssistantMessage;
+  errorMessage?: string;
+}
+
+function isProviderRetryableError(errorMessage?: string): boolean {
+  if (!errorMessage) return false;
+  const lower = errorMessage.toLowerCase();
+  return (
+    lower.includes("429") ||
+    lower.includes("rate limit") ||
+    lower.includes("5") ||
+    lower.includes("timeout") ||
+    lower.includes("econnreset") ||
+    lower.includes("fetch failed") ||
+    lower.includes("abort") ||
+    lower.includes("socket")
+  );
+}
+
 function resolveCost(
   config: AgentConfig,
   pricing: LlmPricingMap,
@@ -147,6 +167,7 @@ export async function createModelRuntime(
   fallback: AgentConfig | undefined,
   callbacks: ModelRuntimeCallbacks = {},
   pricing: LlmPricingMap = {},
+  providerFailureThreshold = 3,
 ): Promise<CreateModelRuntimeResult> {
   const modelRuntime = await ModelRuntime.create({});
 
@@ -169,6 +190,7 @@ export async function createModelRuntime(
   const compositeModel = buildModel(primary, COMPOSITE_PROVIDER_ID, pricing);
   let activeProvider: "primary" | "fallback" = "primary";
   let fallbackNotified = false;
+  let consecutivePrimaryFailures = 0;
 
   const candidates: {
     name: "primary" | "fallback";
@@ -184,12 +206,12 @@ export async function createModelRuntime(
     context: Context,
     options: StreamOptions | undefined,
     output: AssistantMessageEventStream,
-  ): Promise<AssistantMessage | undefined> {
+  ): Promise<TryProviderResult> {
     let stream: AssistantMessageEventStream;
     try {
       stream = modelRuntime.stream(candidate.model, context, options as StreamOptions);
-    } catch {
-      return undefined;
+    } catch (error) {
+      return { errorMessage: error instanceof Error ? error.message : "provider stream failed" };
     }
 
     const events: AssistantMessageEvent[] = [];
@@ -202,20 +224,24 @@ export async function createModelRuntime(
           break;
         }
       }
-    } catch {
-      return undefined;
+    } catch (error) {
+      return { errorMessage: error instanceof Error ? error.message : "stream read failed" };
     }
 
     if (!complete) {
-      const result = await stream.result().catch(() => undefined);
+      const result = await stream.result().catch((error: unknown) => undefined);
       if (!result || result.stopReason === "error" || result.errorMessage) {
-        return undefined;
+        return { errorMessage: result?.errorMessage || "stream result failed" };
       }
-      return result;
+      for (const event of events) {
+        normalizeProviderEvent(event, candidate.config.provider);
+        output.push(event);
+      }
+      return { message: result };
     }
 
     const last = events[events.length - 1];
-    if (!last) return undefined;
+    if (!last) return { errorMessage: "no events from provider" };
 
     let result: AssistantMessage | undefined;
     if (last.type === "done") {
@@ -223,18 +249,18 @@ export async function createModelRuntime(
     } else if (last.type === "error") {
       result = last.error;
     } else {
-      return undefined;
+      return { errorMessage: "incomplete provider stream" };
     }
 
     if (result.stopReason === "error" || result.errorMessage) {
-      return undefined;
+      return { errorMessage: result.errorMessage || "provider returned error" };
     }
 
     for (const event of events) {
       normalizeProviderEvent(event, candidate.config.provider);
       output.push(event);
     }
-    return result;
+    return { message: result };
   }
 
   const stream: ProviderStreams["stream"] = (_model, context, options) => {
@@ -242,6 +268,11 @@ export async function createModelRuntime(
 
     (async () => {
       let lastReason = "unknown";
+
+      // If the primary has not exceeded the failure threshold, prefer it.
+      if (consecutivePrimaryFailures < providerFailureThreshold) {
+        activeProvider = "primary";
+      }
 
       for (const candidate of candidates) {
         if (activeProvider !== candidate.name) {
@@ -258,17 +289,30 @@ export async function createModelRuntime(
           });
         }
 
-        const result = await tryProvider(candidate, context, options, output);
-        if (result) {
+        const { message, errorMessage } = await tryProvider(candidate, context, options, output);
+        if (message) {
           activeProvider = candidate.name;
-          output.end(result);
+          if (candidate.name === "primary") {
+            consecutivePrimaryFailures = 0;
+          }
+          output.end(message);
           return;
         }
 
-        lastReason = `${candidate.config.provider}/${candidate.config.modelId} failed`;
-        if (candidate.name === "primary" && fallback) {
-          activeProvider = "fallback";
-          continue;
+        lastReason = errorMessage || `${candidate.config.provider}/${candidate.config.modelId} failed`;
+
+        if (candidate.name === "primary") {
+          if (isProviderRetryableError(errorMessage)) {
+            consecutivePrimaryFailures++;
+          } else {
+            // Non-retryable failures do not count toward the threshold.
+            consecutivePrimaryFailures = 0;
+          }
+
+          if (fallback) {
+            activeProvider = "fallback";
+            continue;
+          }
         }
       }
 

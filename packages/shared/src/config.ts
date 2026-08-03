@@ -56,6 +56,10 @@ export interface DaybreakConfig {
   sandboxIdleTtlMinutes: number;
   dataRetentionDays: number;
   cleanupEnabled: boolean;
+  maxFileReadBytes: number;
+  maxFileReadLines: number;
+  maxRepoCloneDepth: number;
+  providerFailureThreshold: number;
 }
 
 const DEFAULT_MAX_TURNS = 40;
@@ -86,6 +90,10 @@ const DEFAULT_BRANCH_TTL_DAYS = 7;
 const DEFAULT_SANDBOX_IDLE_TTL_MINUTES = 15;
 const DEFAULT_DATA_RETENTION_DAYS = 30;
 const DEFAULT_CLEANUP_ENABLED = true;
+const DEFAULT_MAX_FILE_READ_BYTES = 200_000;
+const DEFAULT_MAX_FILE_READ_LINES = 5_000;
+const DEFAULT_MAX_REPO_CLONE_DEPTH = 0;
+const DEFAULT_PROVIDER_FAILURE_THRESHOLD = 3;
 
 export const DEFAULT_DENYLIST_PATTERNS: string[] = [
   ".env",
@@ -232,6 +240,10 @@ export function loadConfig(envPath?: string): DaybreakConfig {
     sandboxIdleTtlMinutes: parseIntEnv("DAYBREAK_SANDBOX_IDLE_TTL_MINUTES", DEFAULT_SANDBOX_IDLE_TTL_MINUTES),
     dataRetentionDays: parseIntEnv("DAYBREAK_DATA_RETENTION_DAYS", DEFAULT_DATA_RETENTION_DAYS),
     cleanupEnabled: get("DAYBREAK_CLEANUP_ENABLED") !== "false",
+    maxFileReadBytes: parseIntEnv("DAYBREAK_MAX_FILE_READ_BYTES", DEFAULT_MAX_FILE_READ_BYTES),
+    maxFileReadLines: parseIntEnv("DAYBREAK_MAX_FILE_READ_LINES", DEFAULT_MAX_FILE_READ_LINES),
+    maxRepoCloneDepth: parseIntEnv("DAYBREAK_MAX_REPO_CLONE_DEPTH", DEFAULT_MAX_REPO_CLONE_DEPTH),
+    providerFailureThreshold: parseIntEnv("DAYBREAK_PROVIDER_FAILURE_THRESHOLD", DEFAULT_PROVIDER_FAILURE_THRESHOLD),
   };
 }
 

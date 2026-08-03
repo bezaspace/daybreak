@@ -275,22 +275,22 @@ Over time the target repos accumulate abandoned Daybreak branches and E2B sandbo
 
 Long tasks on non-trivial repos can exceed context windows or pull multi-gigabyte files into the LLM context. Phase 6 adds the final guardrails and tuning knobs.
 
-- [ ] Add `packages/shared/src/config.ts` and `.env.example`:
+- [x] Add `packages/shared/src/config.ts` and `.env.example`:
   - `DAYBREAK_MAX_FILE_READ_BYTES` (default `200000`)
   - `DAYBREAK_MAX_FILE_READ_LINES` (default `5000`)
   - `DAYBREAK_MAX_REPO_CLONE_DEPTH` (default `0`, `0` means full clone)
   - `DAYBREAK_COMPACTION_RESERVE_TOKENS` and `DAYBREAK_COMPACTION_KEEP_RECENT_TOKENS` are already config; also accept per-task overrides from `POST /api/tasks`.
-- [ ] Update `packages/agent-runner/src/run-task.ts`:
+- [x] Update `packages/agent-runner/src/run-task.ts`:
   - If `DAYBREAK_MAX_REPO_CLONE_DEPTH > 0`, pass `--depth <n>` to `git clone`.
-- [ ] Update `packages/shared/src/safety.ts`:
+- [x] Update `packages/shared/src/safety.ts`:
   - In `beforeToolCall`, for `read`/`write`/`edit`, check the target file size and line count; block or truncate if it exceeds `MAX_FILE_READ_BYTES`/`MAX_FILE_READ_LINES`.
-- [ ] Update `packages/agent-runner/src/session.ts`:
+- [x] Update `packages/agent-runner/src/session.ts`:
   - On `turn_start`, if the token count of the current conversation exceeds a threshold, force a compaction round (if Pi exposes the API) or emit a `compaction_advised` event.
   - Ensure `circuit_breaker_triggered` events are emitted for `max_cost_usd` and `max_wall_clock` as well.
-- [ ] Update `packages/agent-runner/src/llm.ts`:
+- [x] Update `packages/agent-runner/src/llm.ts`:
   - Track provider health: consecutive 5xx/429 errors from a provider increment a failure counter; after a threshold, fail-fast to the fallback provider immediately instead of waiting for each call to time out.
-- [ ] Add `packages/agent-runner/src/limits.test.ts` for file-size and circuit-breaker behavior.
-- [ ] Update `packages/ui/src/App.tsx` `formatEvent` to render `compaction_advised` and `circuit_breaker_triggered`.
+- [x] Add `packages/agent-runner/src/limits.test.ts` for file-size and circuit-breaker behavior.
+- [x] Update `packages/ui/src/App.tsx` `formatEvent` to render `compaction_advised` and `circuit_breaker_triggered`.
 
 **Acceptance:**
 - A task with `maxTurns=3` that cannot fix the failing test stops at turn 3 and the dashboard shows `circuit_breaker_triggered: max_turns`.
@@ -303,7 +303,7 @@ Long tasks on non-trivial repos can exceed context windows or pull multi-gigabyt
 
 **What it ships:** Phase 6 is repeatable, budgeted, tested, and marked complete in the roadmap.
 
-- [ ] Extend `packages/evals/src/index.ts` and add `packages/evals/src/resilience.ts`:
+- [x] Extend `packages/evals/src/index.ts` and add `packages/evals/src/resilience.ts`:
   - Queue flood: rapid task creation, assert concurrency and no duplicates.
   - Idempotency: replay same request, assert single task.
   - Retry/dead-letter: force a transient E2B failure, assert retry then dead-letter.
@@ -311,17 +311,17 @@ Long tasks on non-trivial repos can exceed context windows or pull multi-gigabyt
   - Security: attempt `read`/`bash` on `.env` and `../.env`, assert blocked.
   - Circuit breaker: `MAX_TURNS=3` loop, assert stop.
   - Branch cleanup: dry-run deletion of a stale branch.
-- [ ] Add unit/integration tests for `queue.ts`, `idempotency.ts`, `retry.ts`, `tenants.ts`, `budgets.ts`, `security.ts`, `cleanup.ts`.
-- [ ] Update `docs/COST_BUDGET.md`:
+- [x] Add unit/integration tests for `queue.ts`, `idempotency.ts`, `retry.ts`, `tenants.ts`, `budgets.ts`, `security.ts`, `cleanup.ts`.
+- [x] Update `docs/COST_BUDGET.md`:
   - Queue/concurrency savings under webhook floods.
   - Retry/dead-letter cost (extra E2B sandboxes for retries).
   - Tenant budget impact on daily spend.
   - Cleanup savings on Supabase storage and E2B runtime.
-- [ ] Update `docs/SECRETS.md` with tenant headers and new env vars.
-- [ ] Update `decisions.md` with queue strategy, tenant model, retry policy, security hardening, cleanup policy.
-- [ ] Update `roadmap.md` Phase 6 checklist and add a link to this document.
-- [ ] Update `.env.example` with all Phase 6 variables.
-- [ ] Run `pnpm lint && pnpm typecheck && pnpm test && pnpm --filter agent-runner build:bundle && pnpm --filter ui build`.
+- [x] Update `docs/SECRETS.md` with tenant headers and new env vars.
+- [x] Update `decisions.md` with queue strategy, tenant model, retry policy, security hardening, cleanup policy.
+- [x] Update `roadmap.md` Phase 6 checklist and add a link to this document.
+- [x] Update `.env.example` with all Phase 6 variables.
+- [x] Run `pnpm lint && pnpm typecheck && pnpm test && pnpm --filter agent-runner build:bundle && pnpm --filter ui build`.
 
 **Acceptance:**
 - `pnpm eval` includes resilience fixtures and passes.

@@ -89,6 +89,8 @@ export interface Task {
   maxTurns?: number;
   maxCostUsd?: number;
   maxWallClockMinutes?: number;
+  compactionReserveTokens?: number;
+  compactionKeepRecentTokens?: number;
   idempotencyKey?: string;
   retryCount?: number;
   maxRetries?: number;

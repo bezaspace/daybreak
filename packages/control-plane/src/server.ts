@@ -328,6 +328,8 @@ async function executeSpawn(task: Task): Promise<void> {
     MAX_WALL_CLOCK_MINUTES: String(taskMaxWallClockMinutes),
     MAX_COST_USD: String(taskMaxCostUsd),
   };
+  if (task.compactionReserveTokens !== undefined) env.COMPACTION_RESERVE_TOKENS = String(task.compactionReserveTokens);
+  if (task.compactionKeepRecentTokens !== undefined) env.COMPACTION_KEEP_RECENT_TOKENS = String(task.compactionKeepRecentTokens);
 
   const sandboxArgs = [
     "--filter",
@@ -399,6 +401,10 @@ async function spawnRewind(parent: Task, sandboxId: string, checkpointId: string
     COMPACTION_ENABLED: String(config.compactionEnabled),
     COMPACTION_RESERVE_TOKENS: String(config.compactionReserveTokens),
     COMPACTION_KEEP_RECENT_TOKENS: String(config.compactionKeepRecentTokens),
+    DAYBREAK_MAX_FILE_READ_BYTES: String(config.maxFileReadBytes),
+    DAYBREAK_MAX_FILE_READ_LINES: String(config.maxFileReadLines),
+    DAYBREAK_MAX_REPO_CLONE_DEPTH: String(config.maxRepoCloneDepth),
+    DAYBREAK_PROVIDER_FAILURE_THRESHOLD: String(config.providerFailureThreshold),
     TASK_PROMPT: prompt,
   };
 
@@ -561,6 +567,10 @@ async function spawnFork(
     COMPACTION_ENABLED: String(config.compactionEnabled),
     COMPACTION_RESERVE_TOKENS: String(config.compactionReserveTokens),
     COMPACTION_KEEP_RECENT_TOKENS: String(config.compactionKeepRecentTokens),
+    DAYBREAK_MAX_FILE_READ_BYTES: String(config.maxFileReadBytes),
+    DAYBREAK_MAX_FILE_READ_LINES: String(config.maxFileReadLines),
+    DAYBREAK_MAX_REPO_CLONE_DEPTH: String(config.maxRepoCloneDepth),
+    DAYBREAK_PROVIDER_FAILURE_THRESHOLD: String(config.providerFailureThreshold),
     TASK_PROMPT: prompt,
     FORK_SOURCE_BRANCH: parent.prBranch,
   };
@@ -766,6 +776,10 @@ function buildSpawnEnv(taskId: string, prBranch: string, repo: string, branch: s
     COMPACTION_ENABLED: String(config.compactionEnabled),
     COMPACTION_RESERVE_TOKENS: String(config.compactionReserveTokens),
     COMPACTION_KEEP_RECENT_TOKENS: String(config.compactionKeepRecentTokens),
+    DAYBREAK_MAX_FILE_READ_BYTES: String(config.maxFileReadBytes),
+    DAYBREAK_MAX_FILE_READ_LINES: String(config.maxFileReadLines),
+    DAYBREAK_MAX_REPO_CLONE_DEPTH: String(config.maxRepoCloneDepth),
+    DAYBREAK_PROVIDER_FAILURE_THRESHOLD: String(config.providerFailureThreshold),
     GITHUB_TOKEN: config.githubToken || "",
     TARGET_REPO_URL: repo,
     TARGET_BRANCH: branch,
@@ -781,6 +795,8 @@ async function executeReview(task: Task): Promise<void> {
   if (task.maxTurns !== undefined) env.MAX_TURNS = String(task.maxTurns);
   if (task.maxCostUsd !== undefined) env.MAX_COST_USD = String(task.maxCostUsd);
   if (task.maxWallClockMinutes !== undefined) env.MAX_WALL_CLOCK_MINUTES = String(task.maxWallClockMinutes);
+  if (task.compactionReserveTokens !== undefined) env.COMPACTION_RESERVE_TOKENS = String(task.compactionReserveTokens);
+  if (task.compactionKeepRecentTokens !== undefined) env.COMPACTION_KEEP_RECENT_TOKENS = String(task.compactionKeepRecentTokens);
 
   const sandboxArgs = [
     "--filter",
@@ -961,6 +977,8 @@ async function executeHeal(task: Task): Promise<void> {
   if (task.maxTurns !== undefined) env.MAX_TURNS = String(task.maxTurns);
   if (task.maxCostUsd !== undefined) env.MAX_COST_USD = String(task.maxCostUsd);
   if (task.maxWallClockMinutes !== undefined) env.MAX_WALL_CLOCK_MINUTES = String(task.maxWallClockMinutes);
+  if (task.compactionReserveTokens !== undefined) env.COMPACTION_RESERVE_TOKENS = String(task.compactionReserveTokens);
+  if (task.compactionKeepRecentTokens !== undefined) env.COMPACTION_KEEP_RECENT_TOKENS = String(task.compactionKeepRecentTokens);
 
   const sandboxArgs = [
     "--filter",
@@ -1175,7 +1193,9 @@ app.post("/api/tasks", async (c) => {
     maxTurns?: number;
     maxCostUsd?: number;
     maxWallClockMinutes?: number;
-  }>().catch(() => ({}) as { repo?: string; branch?: string; prompt?: string; maxTurns?: number; maxCostUsd?: number; maxWallClockMinutes?: number });
+    compactionReserveTokens?: number;
+    compactionKeepRecentTokens?: number;
+  }>().catch(() => ({}) as { repo?: string; branch?: string; prompt?: string; maxTurns?: number; maxCostUsd?: number; maxWallClockMinutes?: number; compactionReserveTokens?: number; compactionKeepRecentTokens?: number });
   const repo = body.repo;
   const branch = body.branch || "main";
   const prompt = body.prompt;
@@ -1201,6 +1221,8 @@ app.post("/api/tasks", async (c) => {
         maxTurns: body.maxTurns,
         maxCostUsd: body.maxCostUsd,
         maxWallClockMinutes: body.maxWallClockMinutes,
+        compactionReserveTokens: body.compactionReserveTokens,
+        compactionKeepRecentTokens: body.compactionKeepRecentTokens,
         tenantId: tenant.id,
       },
       { idempotencyKey },

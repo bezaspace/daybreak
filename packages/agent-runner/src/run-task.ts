@@ -122,6 +122,14 @@ function toStreamData(event: TaskEvent): unknown {
     case "provider_switched":
     case "fallback_applied":
       return { from: event.from, to: event.to, reason: event.reason, modelId: event.modelId };
+    case "circuit_breaker_triggered":
+      return { reason: event.reason, limit: event.limit, current: event.current };
+    case "cost_alert":
+      return { threshold: event.threshold, limit: event.limit, current: event.current };
+    case "file_too_large":
+      return { path: event.path, size: event.size, maxBytes: event.maxBytes, maxLines: event.maxLines, reason: event.reason };
+    case "compaction_advised":
+      return { tokens: event.tokens, contextWindow: event.contextWindow, reserveTokens: event.reserveTokens };
     case "checkpoint_created": {
       const cp = event.checkpoint;
       return {
@@ -153,6 +161,9 @@ async function main() {
   }
 
   const config = loadConfig();
+  const cloneDepth = config.maxRepoCloneDepth;
+  const depthFlag = cloneDepth > 0 ? ` --depth ${cloneDepth}` : "";
+
   const publisher = createStreamPublisher({
     upstashRedisRestUrl: config.upstashRedisRestUrl,
     upstashRedisToken: config.upstashRedisToken,
@@ -194,7 +205,7 @@ async function main() {
         throw new Error(`Repository at ${targetDir} not found and TARGET_REPO_URL is not set; cannot ${forkFromCheckpoint ? "fork" : "rewind"}`);
       }
       const cloneBranch = forkFromCheckpoint ? forkSourceBranch : targetBranch;
-      run(`rm -rf "${targetDir}" && git clone --branch ${cloneBranch} --single-branch ${targetRepoUrl} "${targetDir}"`, workDir, "inherit");
+      run(`rm -rf "${targetDir}" && git clone --branch ${cloneBranch} --single-branch${depthFlag} ${targetRepoUrl} "${targetDir}"`, workDir, "inherit");
       run(`git config user.name "Daybreak Bot" && git config user.email "daybreak@example.com"`, targetDir, "inherit");
     }
     run(
@@ -218,7 +229,7 @@ async function main() {
           "inherit",
         );
       } else {
-        run(`git clone --branch ${prBranch} --single-branch ${targetRepoUrl} "${targetDir}"`, workDir, "inherit");
+        run(`git clone --branch ${prBranch} --single-branch${depthFlag} ${targetRepoUrl} "${targetDir}"`, workDir, "inherit");
         run(
           `git config user.name "Daybreak Bot" && git config user.email "daybreak@example.com"`,
           targetDir,
@@ -226,7 +237,7 @@ async function main() {
         );
       }
     } else {
-      run(`rm -rf "${targetDir}" && git clone --branch ${targetBranch} --single-branch ${targetRepoUrl} "${targetDir}"`, workDir, "inherit");
+      run(`rm -rf "${targetDir}" && git clone --branch ${targetBranch} --single-branch${depthFlag} ${targetRepoUrl} "${targetDir}"`, workDir, "inherit");
 
       // Create the feature branch and set git identity so the agent cannot
       // accidentally push to the protected target branch.
@@ -250,6 +261,9 @@ async function main() {
   const runner = new TaskRunner(config);
 
   try {
+    const compactionReserveTokens = process.env.COMPACTION_RESERVE_TOKENS ? Number.parseInt(process.env.COMPACTION_RESERVE_TOKENS, 10) : undefined;
+    const compactionKeepRecentTokens = process.env.COMPACTION_KEEP_RECENT_TOKENS ? Number.parseInt(process.env.COMPACTION_KEEP_RECENT_TOKENS, 10) : undefined;
+
     const result = await runner.run({
       prompt,
       cwd: targetDir,
@@ -258,6 +272,8 @@ async function main() {
       taskId,
       checkpoint,
       isFork: Boolean(forkFromCheckpoint),
+      compactionReserveTokens,
+      compactionKeepRecentTokens,
       onEvent: (event) => {
         publisher.publish(event.type, toStreamData(event));
         if (event.type === "tool_execution_update" && event.toolName === "browser") {
