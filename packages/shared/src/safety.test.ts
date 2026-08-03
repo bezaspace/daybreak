@@ -27,6 +27,10 @@ const config: DaybreakConfig = {
   defaultTenantMaxConcurrent: 2,
   globalMaxConcurrentSandboxes: 5,
   costAlertThreshold: 0.8,
+  branchTtlDays: 7,
+  sandboxIdleTtlMinutes: 15,
+  dataRetentionDays: 30,
+  cleanupEnabled: true,
 };
 
 describe("isSensitivePath", () => {

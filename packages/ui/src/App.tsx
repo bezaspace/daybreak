@@ -4,6 +4,7 @@ import { TraceView } from "./TraceView.js";
 import { TimeTravelView } from "./TimeTravelView.js";
 import { CiHealView } from "./CiHealView.js";
 import { DeadLetterView } from "./DeadLetterView.js";
+import { CleanupView } from "./CleanupView.js";
 
 interface StreamEvent {
   id: string;
@@ -53,6 +54,10 @@ interface Config {
   provider?: string;
   maxConcurrentTasks: number;
   queueWorkerEnabled: boolean;
+  branchTtlDays?: number;
+  sandboxIdleTtlMinutes?: number;
+  dataRetentionDays?: number;
+  cleanupEnabled?: boolean;
 }
 
 interface QueueStatus {
@@ -231,7 +236,7 @@ export function App() {
   const [costAlert, setCostAlert] = useState<{ current: number; limit: number; threshold: number } | null>(null);
   const terminalRef = useRef<HTMLPreElement>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [view, setView] = useState<"run" | "trace" | "costs" | "time-travel" | "ci-heal" | "dead-letter">("run");
+  const [view, setView] = useState<"run" | "trace" | "costs" | "time-travel" | "ci-heal" | "dead-letter" | "cleanup">("run");
   const [tenantId, setTenantId] = useState("");
   const [role, setRole] = useState("operator");
   const [userId, setUserId] = useState("");
@@ -402,6 +407,7 @@ export function App() {
           Circuit breakers: {config.maxTurns} turns · {config.maxWallClockMinutes} min · ${config.maxCostUsd} ·
           compaction {config.compactionEnabled ? "on" : "off"}
           {config.e2bTemplate ? ` · template ${config.e2bTemplate}` : ""} · max concurrency {config.maxConcurrentTasks}
+          · cleanup {config.cleanupEnabled ? "on" : "off"} ({config.branchTtlDays}d / {config.sandboxIdleTtlMinutes}m / {config.dataRetentionDays}d)
         </div>
       )}
       {queueStatus && (
@@ -519,6 +525,9 @@ export function App() {
           <button type="button" disabled={view === "dead-letter"} onClick={() => setView("dead-letter")}>
             Dead Letter
           </button>
+          <button type="button" disabled={view === "cleanup"} onClick={() => setView("cleanup")}>
+            Cleanup
+          </button>
         </div>
       )}
 
@@ -539,6 +548,8 @@ export function App() {
       {view === "ci-heal" && <CiHealView tasks={tasks} />}
 
       {view === "dead-letter" && <DeadLetterView />}
+
+      {view === "cleanup" && <CleanupView />}
 
       {view !== "run" ? null : screenshots.length > 0 && (
         <div style={{ marginBottom: "1rem" }}>

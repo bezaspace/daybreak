@@ -19,6 +19,7 @@ import {
   updateTask,
   persistEvent,
   getEvents,
+  getSupabase,
   listCheckpoints,
   getCheckpoint,
   updateCheckpoint,
@@ -33,6 +34,7 @@ import { TaskQueue, type TaskSpec } from "./queue.js";
 import { createIdempotencyKey, IdempotencyStore } from "./idempotency.js";
 import { TaskRejectedError } from "./errors.js";
 import { TenantService, type Tenant } from "./tenants.js";
+import { CleanupService, type CleanupResult } from "./cleanup.js";
 
 const repoRoot = resolve(import.meta.dirname ?? process.cwd(), "../..");
 
@@ -1026,6 +1028,23 @@ if (config.queueWorkerEnabled && process.env.NODE_ENV !== "test") {
   queue.start();
 }
 
+const cleanupService = new CleanupService({
+  config,
+  githubToken: config.githubToken,
+  sandboxTerminator: killSandbox,
+  supabase: getSupabase(),
+});
+
+if (config.cleanupEnabled && process.env.NODE_ENV !== "test") {
+  // Run cleanup periodically; Phase 7 will replace this with Cloudflare scheduled Workers.
+  const cleanupIntervalMs = Math.max(config.queueWorkerPollMs * 10, 30 * 1000);
+  setInterval(() => {
+    cleanupService.runAll(false).catch((error) => {
+      console.error("[cleanup] scheduled run failed:", error);
+    });
+  }, cleanupIntervalMs);
+}
+
 const app = new Hono();
 
 app.use("/api/*", cors({ origin: "*" }));
@@ -1042,6 +1061,10 @@ app.get("/api/config", (c) => {
     provider: config.llm.provider,
     maxConcurrentTasks: config.maxConcurrentTasks,
     queueWorkerEnabled: config.queueWorkerEnabled,
+    branchTtlDays: config.branchTtlDays,
+    sandboxIdleTtlMinutes: config.sandboxIdleTtlMinutes,
+    dataRetentionDays: config.dataRetentionDays,
+    cleanupEnabled: config.cleanupEnabled,
   });
 });
 
@@ -1121,6 +1144,27 @@ app.post("/api/dead-letter/:taskId/retry", async (c) => {
   await publishEvent(taskId, "task_retry", { fromDeadLetter: true, deadLetterId: dl.id });
   queue.start();
   return c.json({ ok: true, taskId }, 202);
+});
+
+app.post("/api/cleanup", async (c) => {
+  const type = c.req.query("type") || "all";
+  const dryRun = c.req.query("dryRun") === "true";
+  let results: CleanupResult[] = [];
+
+  if (type === "all") {
+    results = await cleanupService.runAll(dryRun);
+  } else if (type === "branches") {
+    results = [await cleanupService.cleanupBranches(dryRun)];
+  } else if (type === "sandboxes") {
+    results = [await cleanupService.cleanupSandboxes(dryRun)];
+  } else if (type === "data") {
+    results = [await cleanupService.cleanupDataRetention(dryRun)];
+  } else {
+    return c.json({ error: `invalid cleanup type: ${type}` }, 400);
+  }
+
+  const totalDeleted = results.reduce((sum, r) => sum + r.deletedCount, 0);
+  return c.json({ ok: true, dryRun, results, totalDeleted });
 });
 
 app.post("/api/tasks", async (c) => {

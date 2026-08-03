@@ -52,6 +52,10 @@ export interface DaybreakConfig {
   defaultTenantMaxConcurrent: number;
   globalMaxConcurrentSandboxes: number;
   costAlertThreshold: number;
+  branchTtlDays: number;
+  sandboxIdleTtlMinutes: number;
+  dataRetentionDays: number;
+  cleanupEnabled: boolean;
 }
 
 const DEFAULT_MAX_TURNS = 40;
@@ -78,6 +82,10 @@ const DEFAULT_TENANT_TASKS_PER_HOUR = 10;
 const DEFAULT_TENANT_MAX_CONCURRENT = 2;
 const DEFAULT_GLOBAL_MAX_CONCURRENT_SANDBOXES = 5;
 const DEFAULT_COST_ALERT_THRESHOLD = 0.8;
+const DEFAULT_BRANCH_TTL_DAYS = 7;
+const DEFAULT_SANDBOX_IDLE_TTL_MINUTES = 15;
+const DEFAULT_DATA_RETENTION_DAYS = 30;
+const DEFAULT_CLEANUP_ENABLED = true;
 
 export const DEFAULT_DENYLIST_PATTERNS: string[] = [
   ".env",
@@ -220,6 +228,10 @@ export function loadConfig(envPath?: string): DaybreakConfig {
     defaultTenantMaxConcurrent: parseIntEnv("DAYBREAK_DEFAULT_TENANT_MAX_CONCURRENT", DEFAULT_TENANT_MAX_CONCURRENT),
     globalMaxConcurrentSandboxes: parseIntEnv("DAYBREAK_GLOBAL_MAX_CONCURRENT_SANDBOXES", DEFAULT_GLOBAL_MAX_CONCURRENT_SANDBOXES),
     costAlertThreshold: parseFloatEnv("DAYBREAK_COST_ALERT_THRESHOLD", DEFAULT_COST_ALERT_THRESHOLD),
+    branchTtlDays: parseIntEnv("DAYBREAK_BRANCH_TTL_DAYS", DEFAULT_BRANCH_TTL_DAYS),
+    sandboxIdleTtlMinutes: parseIntEnv("DAYBREAK_SANDBOX_IDLE_TTL_MINUTES", DEFAULT_SANDBOX_IDLE_TTL_MINUTES),
+    dataRetentionDays: parseIntEnv("DAYBREAK_DATA_RETENTION_DAYS", DEFAULT_DATA_RETENTION_DAYS),
+    cleanupEnabled: get("DAYBREAK_CLEANUP_ENABLED") !== "false",
   };
 }
 
