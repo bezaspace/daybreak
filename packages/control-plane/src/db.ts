@@ -26,6 +26,9 @@ export interface PersistedTask {
   root_checkpoint_id?: string | null;
   parent_task_id?: string | null;
   parent_checkpoint_id?: string | null;
+  head_sha?: string | null;
+  check_run_id?: string | null;
+  heal_attempt?: number | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -64,6 +67,9 @@ export interface Task {
   rootCheckpointId?: string;
   parentTaskId?: string;
   parentCheckpointId?: string;
+  headSha?: string;
+  checkRunId?: string;
+  healAttempt?: number;
 }
 
 export interface PersistedWorkspace {
@@ -130,6 +136,9 @@ function toTask(row: PersistedTask): Task {
     rootCheckpointId: row.root_checkpoint_id ?? undefined,
     parentTaskId: row.parent_task_id ?? undefined,
     parentCheckpointId: row.parent_checkpoint_id ?? undefined,
+    headSha: row.head_sha ?? undefined,
+    checkRunId: row.check_run_id ?? undefined,
+    healAttempt: row.heal_attempt ?? undefined,
   };
 }
 
@@ -160,6 +169,9 @@ export async function persistTask(task: Task): Promise<boolean> {
     root_checkpoint_id: task.rootCheckpointId ?? null,
     parent_task_id: task.parentTaskId ?? null,
     parent_checkpoint_id: task.parentCheckpointId ?? null,
+    head_sha: task.headSha ?? null,
+    check_run_id: task.checkRunId ?? null,
+    heal_attempt: task.healAttempt ?? null,
     updated_at: new Date().toISOString(),
   });
   if (error) {
@@ -185,6 +197,9 @@ export async function updateTask(id: string, updates: Partial<Task>): Promise<bo
   if (updates.rootCheckpointId !== undefined) payload.root_checkpoint_id = updates.rootCheckpointId ?? null;
   if (updates.parentTaskId !== undefined) payload.parent_task_id = updates.parentTaskId ?? null;
   if (updates.parentCheckpointId !== undefined) payload.parent_checkpoint_id = updates.parentCheckpointId ?? null;
+  if (updates.headSha !== undefined) payload.head_sha = updates.headSha ?? null;
+  if (updates.checkRunId !== undefined) payload.check_run_id = updates.checkRunId ?? null;
+  if (updates.healAttempt !== undefined) payload.heal_attempt = updates.healAttempt ?? null;
   const { error } = await supabase.from("tasks").update(payload).eq("id", id);
   if (error) {
     console.error("[db] updateTask error:", error.message);

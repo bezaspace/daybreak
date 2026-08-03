@@ -13,6 +13,9 @@ const config: DaybreakConfig = {
   compactionEnabled: true,
   compactionReserveTokens: 4000,
   compactionKeepRecentTokens: 8000,
+  ciSelfHealEnabled: true,
+  prBranchPrefix: "daybreak/",
+  maxHealAttemptsPerPr: 2,
 };
 
 describe("isSensitivePath", () => {

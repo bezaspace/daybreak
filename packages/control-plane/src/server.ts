@@ -12,7 +12,6 @@ import { appendFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { serve } from "@hono/node-server";
-import { Sandbox } from "e2b";
 import {
   getTasks,
   getTask,
@@ -30,6 +29,16 @@ import {
 } from "./db.js";
 
 const repoRoot = resolve(import.meta.dirname ?? process.cwd(), "../..");
+
+let e2bSandboxClass: typeof import("e2b").Sandbox | undefined;
+
+async function getE2BSandboxClass(): Promise<typeof import("e2b").Sandbox> {
+  if (!e2bSandboxClass) {
+    const e2b = await import("e2b");
+    e2bSandboxClass = e2b.Sandbox;
+  }
+  return e2bSandboxClass;
+}
 
 function parseRepo(repoUrl: string): { owner: string; repo: string } | undefined {
   try {
@@ -133,10 +142,10 @@ async function publishEvent(taskId: string, type: string, data: unknown) {
 const tasks = new Map<string, Task>();
 const rewindingTasks = new Set<string>();
 
-function taskFrom(body: { repo: string; branch: string; id?: string; prBranch?: string; triggerSource?: string; githubSender?: string; prNumber?: number; prompt?: string; status?: Task["status"]; workspaceId?: string; parentTaskId?: string; parentCheckpointId?: string }): Task {
+function taskFrom(body: { repo: string; branch: string; id?: string; prBranch?: string; triggerSource?: string; githubSender?: string; prNumber?: number; prompt?: string; status?: Task["status"]; workspaceId?: string; parentTaskId?: string; parentCheckpointId?: string; headSha?: string; checkRunId?: string; healAttempt?: number }): Task {
   const id = body.id ?? randomUUID();
   const prBranch = body.prBranch ?? `daybreak/${id}`;
-  return { id, repo: body.repo, branch: body.branch, prBranch, status: body.status ?? "running", startedAt: Date.now(), triggerSource: body.triggerSource, githubSender: body.githubSender, prNumber: body.prNumber, prompt: body.prompt, workspaceId: body.workspaceId, parentTaskId: body.parentTaskId, parentCheckpointId: body.parentCheckpointId };
+  return { id, repo: body.repo, branch: body.branch, prBranch, status: body.status ?? "running", startedAt: Date.now(), triggerSource: body.triggerSource, githubSender: body.githubSender, prNumber: body.prNumber, prompt: body.prompt, workspaceId: body.workspaceId, parentTaskId: body.parentTaskId, parentCheckpointId: body.parentCheckpointId, headSha: body.headSha, checkRunId: body.checkRunId, healAttempt: body.healAttempt };
 }
 
 async function syncEventsFromRedis(taskId: string) {
@@ -176,6 +185,20 @@ function isRepoAllowed(repoFullName: string, allowlist?: string): boolean {
   const patterns = allowlist.split(",").map((p) => p.trim()).filter(Boolean);
   if (patterns.length === 0) return false;
   return patterns.some((pattern) => matchesAllowlist(repoFullName, pattern));
+}
+
+function getFirstPullRequest(checkRun: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (!checkRun) return undefined;
+  const fromRun = Array.isArray(checkRun.pull_requests) ? checkRun.pull_requests : [];
+  if (fromRun.length > 0) {
+    return asRecord(fromRun[0]);
+  }
+  const checkSuite = asRecord(checkRun.check_suite);
+  const fromSuite = Array.isArray(checkSuite?.pull_requests) ? checkSuite.pull_requests : [];
+  if (fromSuite.length > 0) {
+    return asRecord(fromSuite[0]);
+  }
+  return undefined;
 }
 
 function verifyWebhookSignature(secret: string, body: Buffer, signature: string): boolean {
@@ -470,6 +493,7 @@ async function spawnFork(
         throw new Error(`Cannot create E2B snapshot: parent sandbox id not found for ${parent.id}`);
       }
       console.log(`[control-plane] creating E2B snapshot from sandbox ${sandboxId} for fork ${child.id}...`);
+      const Sandbox = await getE2BSandboxClass();
       const snapshot = await Sandbox.createSnapshot(sandboxId, { apiKey: config.e2bApiKey });
       e2bSnapshotId = snapshot.snapshotId;
       console.log(`[control-plane] snapshot created: ${e2bSnapshotId}`);
@@ -570,11 +594,11 @@ async function spawnFork(
   return child;
 }
 
-async function createPendingTask(spec: { repo: string; branch: string; prBranch: string; prompt?: string; triggerSource: string; githubSender?: string; prNumber?: number }): Promise<Task> {
+async function createPendingTask(spec: { repo: string; branch: string; prBranch: string; prompt?: string; triggerSource: string; githubSender?: string; prNumber?: number; headSha?: string; checkRunId?: string; healAttempt?: number }): Promise<Task> {
   const task = taskFrom({ ...spec, status: "pending" });
   tasks.set(task.id, task);
   await persistTask(task);
-  await publishEvent(task.id, "task_pending", { triggerSource: task.triggerSource, githubSender: task.githubSender, prNumber: task.prNumber });
+  await publishEvent(task.id, "task_pending", { triggerSource: task.triggerSource, githubSender: task.githubSender, prNumber: task.prNumber, checkRunId: task.checkRunId, headSha: task.headSha });
   return task;
 }
 
@@ -617,6 +641,7 @@ async function validatePat(repoUrl: string, token: string): Promise<{ ok: boolea
 
 async function killSandbox(sandboxId: string): Promise<boolean> {
   try {
+    const Sandbox = await getE2BSandboxClass();
     return await Sandbox.kill(sandboxId, { apiKey: config.e2bApiKey });
   } catch (error) {
     console.error(`[control-plane] failed to kill sandbox ${sandboxId}:`, error);
@@ -949,7 +974,91 @@ app.post(
         return c.json({ ok: true, event: "ping" }, 200);
       }
       case "check_run": {
-        return c.json({ ok: true, event: "check_run" }, 200);
+        if (!config.ciSelfHealEnabled) {
+          return c.json({ ok: true, note: "CI self-healing is disabled" }, 200);
+        }
+
+        const action = typeof payload.action === "string" ? payload.action : "";
+        if (action !== "completed") {
+          return c.json({ ok: true, note: "ignored non-completed check_run" }, 200);
+        }
+
+        const checkRun = asRecord(payload.check_run);
+        if (!checkRun) {
+          return c.json({ error: "missing check_run" }, 400);
+        }
+
+        const conclusion = typeof checkRun.conclusion === "string" ? checkRun.conclusion : "";
+        if (conclusion !== "failure") {
+          return c.json({ ok: true, note: `ignored check_run with conclusion: ${conclusion}` }, 200);
+        }
+
+        const checkSuite = asRecord(checkRun.check_suite);
+        const pr = getFirstPullRequest(checkRun);
+
+        const headBranch = typeof checkSuite?.head_branch === "string"
+          ? checkSuite.head_branch
+          : (pr && typeof pr.head === "object" && pr.head !== null
+              ? asRecord(pr.head)?.ref
+              : undefined);
+        if (typeof headBranch !== "string" || !headBranch) {
+          return c.json({ error: "missing head branch" }, 400);
+        }
+
+        const baseRef = (pr && typeof pr.base === "object" && pr.base !== null
+          ? asRecord(pr.base)?.ref
+          : undefined);
+        const baseBranch = typeof baseRef === "string" && baseRef
+          ? baseRef
+          : (typeof repository?.default_branch === "string" && repository.default_branch
+              ? repository.default_branch
+              : "main");
+
+        const headSha = typeof checkRun.head_sha === "string"
+          ? checkRun.head_sha
+          : (typeof checkSuite?.head_sha === "string" ? checkSuite.head_sha : "");
+
+        const prNumber = typeof pr?.number === "number" ? pr.number : undefined;
+
+        if (config.protectedBranches.includes(headBranch)) {
+          return c.json({ ok: true, note: "ignored check_run on protected branch" }, 200);
+        }
+
+        const originalTask = await findOriginalTask(repoUrl, prNumber ?? 0, headBranch);
+        if (!originalTask && !headBranch.startsWith(config.prBranchPrefix)) {
+          return c.json({ ok: true, note: "branch is not a Daybreak PR" }, 200);
+        }
+
+        const checkRunId = typeof checkRun.id === "number" ? String(checkRun.id) : (typeof checkRun.id === "string" ? checkRun.id : "");
+        const checkSuiteId = typeof checkSuite?.id === "number" ? String(checkSuite.id) : (typeof checkSuite?.id === "string" ? String(checkSuite.id) : "");
+        const checkName = typeof checkRun.name === "string" ? checkRun.name : "";
+
+        const prompt = `CI check "${checkName}" failed on PR #${prNumber ?? "unknown"} in ${repoUrl} (branch: ${headBranch}, commit: ${headSha}). Self-heal task pending.`;
+
+        const task = await createPendingTask({
+          repo: repoUrl,
+          branch: baseBranch,
+          prBranch: headBranch,
+          prNumber,
+          triggerSource: "check_run",
+          headSha,
+          checkRunId,
+          healAttempt: 1,
+          prompt,
+        });
+
+        await publishEvent(task.id, "ci_failure_received", {
+          checkRunId,
+          checkSuiteId,
+          checkName,
+          headBranch,
+          headSha,
+          prNumber,
+          repo: repoFullName,
+          repoUrl,
+        });
+
+        return c.json({ taskId: task.id, repo: repoFullName, branch: baseBranch, prBranch: headBranch, headSha, status: task.status }, 202);
       }
       case "issue_comment": {
         const action = typeof payload.action === "string" ? payload.action : "";

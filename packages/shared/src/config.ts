@@ -38,6 +38,9 @@ export interface DaybreakConfig {
   sessionStoreBackend?: "file" | "supabase";
   forkStrategy?: "auto" | "snapshot" | "git-reinstall";
   maxCheckpointsPerTask?: number;
+  ciSelfHealEnabled: boolean;
+  prBranchPrefix: string;
+  maxHealAttemptsPerPr: number;
 }
 
 const DEFAULT_MAX_TURNS = 40;
@@ -51,6 +54,9 @@ const DEFAULT_CHECKPOINT_INTERVAL: "turn" | "tool" = "tool";
 const DEFAULT_SESSION_STORE_BACKEND: "file" | "supabase" = "supabase";
 const DEFAULT_FORK_STRATEGY: "auto" | "snapshot" | "git-reinstall" = "auto";
 const DEFAULT_MAX_CHECKPOINTS_PER_TASK = 100;
+const DEFAULT_CI_SELF_HEAL_ENABLED = true;
+const DEFAULT_PR_BRANCH_PREFIX = "daybreak/";
+const DEFAULT_MAX_HEAL_ATTEMPTS_PER_PR = 2;
 
 export const DEFAULT_DENYLIST_PATTERNS: string[] = [
   ".env",
@@ -168,6 +174,9 @@ export function loadConfig(envPath?: string): DaybreakConfig {
     sessionStoreBackend: (get("DAYBREAK_SESSION_STORE_BACKEND") as "file" | "supabase") || DEFAULT_SESSION_STORE_BACKEND,
     forkStrategy: (get("DAYBREAK_FORK_STRATEGY") as "auto" | "snapshot" | "git-reinstall") || DEFAULT_FORK_STRATEGY,
     maxCheckpointsPerTask: parseIntEnv("DAYBREAK_MAX_CHECKPOINTS_PER_TASK", DEFAULT_MAX_CHECKPOINTS_PER_TASK),
+    ciSelfHealEnabled: get("DAYBREAK_CI_SELF_HEAL_ENABLED") !== "false",
+    prBranchPrefix: get("DAYBREAK_PR_BRANCH_PREFIX") || DEFAULT_PR_BRANCH_PREFIX,
+    maxHealAttemptsPerPr: parseIntEnv("DAYBREAK_MAX_HEAL_ATTEMPTS_PER_PR", DEFAULT_MAX_HEAL_ATTEMPTS_PER_PR),
   };
 }
 

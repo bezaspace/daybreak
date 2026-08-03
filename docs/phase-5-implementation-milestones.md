@@ -22,25 +22,25 @@ This document breaks the Phase 5 exit criteria into small, independently-demoabl
 
 **What it ships:** The control plane accepts `check_run` webhooks, verifies them the same way as other GitHub events, and only acts on failed checks for branches that Daybreak created.
 
-- [ ] Extend `packages/control-plane/src/server.ts` `POST /api/webhooks/github`:
+- [x] Extend `packages/control-plane/src/server.ts` `POST /api/webhooks/github`:
   - Add a `case "check_run"` handler.
   - Parse `action`, `check_run.conclusion`, `check_run.id`, `check_run.name`, `check_run.output`, `check_run.check_suite.id`, `check_run.check_suite.head_branch`, `check_run.check_suite.pull_requests`, and `check_run.pull_requests`.
   - Only process `action === "completed"` and `conclusion === "failure"`.
-- [ ] Filter to Daybreak PRs:
+- [x] Filter to Daybreak PRs:
   - Look up an existing task by `repo` + `pr_branch` matching `head_branch`.
   - Fallback: allow branches matching `DAYBREAK_PR_BRANCH_PREFIX` (default `daybreak/`).
   - Reuse `GITHUB_WEBHOOK_REPO_ALLOWLIST` for repo trust.
-- [ ] Add `triggerSource: "check_run"` to `Task` / `PersistedTask` and to `packages/shared/src/types.ts` if it is not already covered by the loose string.
-- [ ] Add `headSha`, `checkRunId`, and `healAttempt` fields to `Task` / `PersistedTask` and to the Supabase `tasks` table (`supabase/migrations/20260805_add_ci_heal_fields.sql`):
+- [x] Add `triggerSource: "check_run"` to `Task` / `PersistedTask`.
+- [x] Add `headSha`, `checkRunId`, and `healAttempt` fields to `Task` / `PersistedTask` and to the Supabase `tasks` table (`supabase/migrations/2026080501_add_ci_heal_fields.sql`):
   - `head_sha text`
   - `check_run_id text`
   - `heal_attempt integer`
-- [ ] Add config to `packages/shared/src/config.ts` and `.env.example`:
+- [x] Add config to `packages/shared/src/config.ts` and `.env.example`:
   - `DAYBREAK_CI_SELF_HEAL_ENABLED` (`true` | `false`, default `true`)
   - `DAYBREAK_PR_BRANCH_PREFIX` (default `daybreak/`)
   - `DAYBREAK_MAX_HEAL_ATTEMPTS_PER_PR` (default `2`)
-- [ ] Emit a `ci_failure_received` stream event with `checkRunId`, `checkSuiteId`, `checkName`, `headBranch`, `headSha`, `prNumber`, and `repo`.
-- [ ] Add unit/integration test in `packages/control-plane/src/server.test.ts`:
+- [x] Emit a `ci_failure_received` stream event with `checkRunId`, `checkSuiteId`, `checkName`, `headBranch`, `headSha`, `prNumber`, and `repo`.
+- [x] Add unit/integration test in `packages/control-plane/src/server.test.ts`:
   - A synthetic `check_run` failure for a `daybreak/` branch returns `202` and creates a task with `triggerSource: "check_run"`.
   - A `check_run` for `main`, for `conclusion: success`, or for a repo outside the allowlist returns `200` and does **not** create a task.
 

@@ -217,4 +217,95 @@ describe("time-travel endpoints", () => {
     expect(json.taskId).toBeDefined();
     expect(json.prBranch).toBe("feature-branch");
   });
+
+describe("check_run webhooks", () => {
+    function makeCheckRunBody({ branch, conclusion, repo = "bezaspace/daybreak-target", prNumber = 42 }: { branch: string; conclusion: string; repo?: string; prNumber?: number }) {
+      const [owner, name] = repo.split("/");
+      return {
+        action: "completed",
+        repository: { full_name: repo, clone_url: `https://github.com/${repo}.git`, default_branch: "main", owner: { login: owner }, name },
+        check_run: {
+          id: 987654321,
+          name: "test",
+          head_sha: "abc123def456",
+          status: "completed",
+          conclusion,
+          output: { title: null, summary: "", text: "", annotations_count: 0, annotations_url: "" },
+          check_suite: {
+            id: 123456789,
+            head_branch: branch,
+            head_sha: "abc123def456",
+            status: "completed",
+            conclusion,
+            pull_requests: [{ number: prNumber, head: { ref: branch }, base: { ref: "main" } }],
+          },
+          pull_requests: [{ number: prNumber, head: { ref: branch }, base: { ref: "main" } }],
+        },
+        sender: { login: "ghost" },
+      };
+    }
+
+    it("creates a pending heal task from a failed check_run on a daybreak branch", async () => {
+      const branch = "daybreak/check-run-test-1";
+      const res = await app.request("/api/webhooks/github", await makeGitHubWebhookPayload("check_run", makeCheckRunBody({ branch, conclusion: "failure" })));
+      expect(res.status).toBe(202);
+      const json = (await res.json()) as { taskId?: string; prBranch?: string; status?: string; headSha?: string };
+      expect(json.taskId).toBeDefined();
+      expect(json.prBranch).toBe(branch);
+      expect(json.status).toBe("pending");
+      expect(json.headSha).toBe("abc123def456");
+
+      const tasksRes = await app.request("/api/tasks");
+      expect(tasksRes.status).toBe(200);
+      const tasks = (await tasksRes.json()) as Array<{ repo: string; prBranch: string; triggerSource?: string; status: string; headSha?: string; checkRunId?: string }>;
+      const task = tasks.find((t) => t.repo === "https://github.com/bezaspace/daybreak-target.git" && t.prBranch === branch);
+      expect(task).toBeDefined();
+      expect(task?.triggerSource).toBe("check_run");
+      expect(task?.status).toBe("pending");
+      expect(task?.headSha).toBe("abc123def456");
+      expect(task?.checkRunId).toBe("987654321");
+    });
+
+    it("ignores a check_run with conclusion success", async () => {
+      const branch = "daybreak/check-run-success-1";
+      const res = await app.request("/api/webhooks/github", await makeGitHubWebhookPayload("check_run", makeCheckRunBody({ branch, conclusion: "success" })));
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as { ok: boolean; note?: string };
+      expect(json.ok).toBe(true);
+      expect(json.note).toContain("conclusion");
+
+      const tasksRes = await app.request("/api/tasks");
+      const tasks = (await tasksRes.json()) as Array<{ repo: string; prBranch: string; triggerSource?: string }>;
+      const task = tasks.find((t) => t.repo === "https://github.com/bezaspace/daybreak-target.git" && t.prBranch === branch && t.triggerSource === "check_run");
+      expect(task).toBeUndefined();
+    });
+
+    it("ignores a failed check_run on a protected branch", async () => {
+      const branch = "main";
+      const res = await app.request("/api/webhooks/github", await makeGitHubWebhookPayload("check_run", makeCheckRunBody({ branch, conclusion: "failure" })));
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as { ok: boolean; note?: string };
+      expect(json.ok).toBe(true);
+      expect(json.note).toContain("protected branch");
+
+      const tasksRes = await app.request("/api/tasks");
+      const tasks = (await tasksRes.json()) as Array<{ repo: string; prBranch: string; triggerSource?: string }>;
+      const task = tasks.find((t) => t.repo === "https://github.com/bezaspace/daybreak-target.git" && t.prBranch === branch && t.triggerSource === "check_run");
+      expect(task).toBeUndefined();
+    });
+
+    it("ignores a failed check_run on a non-daybreak branch", async () => {
+      const branch = "feature/not-daybreak";
+      const res = await app.request("/api/webhooks/github", await makeGitHubWebhookPayload("check_run", makeCheckRunBody({ branch, conclusion: "failure", prNumber: 99 })));
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as { ok: boolean; note?: string };
+      expect(json.ok).toBe(true);
+      expect(json.note).toContain("Daybreak PR");
+
+      const tasksRes = await app.request("/api/tasks");
+      const tasks = (await tasksRes.json()) as Array<{ repo: string; prBranch: string; triggerSource?: string }>;
+      const task = tasks.find((t) => t.repo === "https://github.com/bezaspace/daybreak-target.git" && t.prBranch === branch && t.triggerSource === "check_run");
+      expect(task).toBeUndefined();
+    });
+  });
 });
