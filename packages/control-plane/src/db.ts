@@ -2,6 +2,9 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { loadConfig } from "@daybreak/shared";
 import type { Checkpoint, PersistedCheckpoint } from "@daybreak/shared";
 
+let memoryDeadLetterId = 0;
+const memoryDeadLetterTasks: DeadLetterTask[] = [];
+
 export interface PersistedTask {
   id: string;
   repo: string;
@@ -33,6 +36,10 @@ export interface PersistedTask {
   worker_id?: string | null;
   metadata?: unknown | null;
   idempotency_key?: string | null;
+  retry_count?: number | null;
+  max_retries?: number | null;
+  next_retry_at?: string | null;
+  last_error?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -52,7 +59,7 @@ export interface Task {
   repo: string;
   branch: string;
   prBranch: string;
-  status: "pending" | "running" | "complete" | "failed" | "abandoned" | "promoted" | "cancelled";
+  status: "pending" | "running" | "complete" | "failed" | "abandoned" | "promoted" | "cancelled" | "retry_scheduled";
   startedAt: number;
   endedAt?: number;
   exitCode?: number;
@@ -81,6 +88,10 @@ export interface Task {
   maxCostUsd?: number;
   maxWallClockMinutes?: number;
   idempotencyKey?: string;
+  retryCount?: number;
+  maxRetries?: number;
+  nextRetryAt?: number;
+  lastError?: string;
 }
 
 export interface PersistedWorkspace {
@@ -154,6 +165,10 @@ function toTask(row: PersistedTask): Task {
     workerId: row.worker_id ?? undefined,
     metadata: (row.metadata as Record<string, unknown>) ?? undefined,
     idempotencyKey: row.idempotency_key ?? undefined,
+    retryCount: row.retry_count ?? undefined,
+    maxRetries: row.max_retries ?? undefined,
+    nextRetryAt: row.next_retry_at ? new Date(row.next_retry_at).getTime() : undefined,
+    lastError: row.last_error ?? undefined,
   };
 }
 
@@ -191,6 +206,10 @@ export async function persistTask(task: Task): Promise<boolean> {
     worker_id: task.workerId ?? null,
     metadata: task.metadata ?? null,
     idempotency_key: task.idempotencyKey ?? null,
+    retry_count: task.retryCount ?? 0,
+    max_retries: task.maxRetries ?? 2,
+    next_retry_at: task.nextRetryAt ? new Date(task.nextRetryAt).toISOString() : null,
+    last_error: task.lastError ?? null,
     updated_at: new Date().toISOString(),
   });
   if (error) {
@@ -223,6 +242,10 @@ export async function updateTask(id: string, updates: Partial<Task>): Promise<bo
   if (updates.workerId !== undefined) payload.worker_id = updates.workerId ?? null;
   if (updates.metadata !== undefined) payload.metadata = updates.metadata ?? null;
   if (updates.idempotencyKey !== undefined) payload.idempotency_key = updates.idempotencyKey ?? null;
+  if (updates.retryCount !== undefined) payload.retry_count = updates.retryCount ?? 0;
+  if (updates.maxRetries !== undefined) payload.max_retries = updates.maxRetries ?? 2;
+  if (updates.nextRetryAt !== undefined) payload.next_retry_at = updates.nextRetryAt ? new Date(updates.nextRetryAt).toISOString() : null;
+  if (updates.lastError !== undefined) payload.last_error = updates.lastError ?? null;
   const { error } = await supabase.from("tasks").update(payload).eq("id", id);
   if (error) {
     console.error("[db] updateTask error:", error.message);
@@ -470,6 +493,138 @@ export async function updateCheckpointStatus(id: string, status: Checkpoint["sta
     .eq("id", id);
   if (error) {
     console.error("[db] updateCheckpointStatus error:", error.message);
+    return false;
+  }
+  return true;
+}
+
+export interface PersistedDeadLetterTask {
+  id: string;
+  task_id?: string | null;
+  repo?: string | null;
+  branch?: string | null;
+  pr_branch?: string | null;
+  error?: string | null;
+  retry_count?: number | null;
+  created_at?: string;
+  resolved_at?: string | null;
+  resolution?: string | null;
+}
+
+export interface DeadLetterTask {
+  id: string;
+  taskId?: string;
+  repo?: string;
+  branch?: string;
+  prBranch?: string;
+  error?: string;
+  retryCount?: number;
+  createdAt?: number;
+  resolvedAt?: number;
+  resolution?: string;
+}
+
+function makeMemoryDeadLetterTask(task: Task, error: string): DeadLetterTask {
+  memoryDeadLetterId += 1;
+  return {
+    id: `dl-mem-${memoryDeadLetterId}`,
+    taskId: task.id,
+    repo: task.repo,
+    branch: task.branch,
+    prBranch: task.prBranch,
+    error,
+    retryCount: task.retryCount ?? 0,
+    createdAt: Date.now(),
+  };
+}
+
+function toDeadLetterTask(row: PersistedDeadLetterTask): DeadLetterTask {
+  return {
+    id: row.id,
+    taskId: row.task_id ?? undefined,
+    repo: row.repo ?? undefined,
+    branch: row.branch ?? undefined,
+    prBranch: row.pr_branch ?? undefined,
+    error: row.error ?? undefined,
+    retryCount: row.retry_count ?? undefined,
+    createdAt: row.created_at ? new Date(row.created_at).getTime() : undefined,
+    resolvedAt: row.resolved_at ? new Date(row.resolved_at).getTime() : undefined,
+    resolution: row.resolution ?? undefined,
+  };
+}
+
+export async function insertDeadLetterTask(task: Task, error: string): Promise<DeadLetterTask | undefined> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    const dl = makeMemoryDeadLetterTask(task, error);
+    memoryDeadLetterTasks.push(dl);
+    return dl;
+  }
+  const { data, error: dbError } = await supabase
+    .from("dead_letter_tasks")
+    .insert({
+      task_id: task.id,
+      repo: task.repo,
+      branch: task.branch,
+      pr_branch: task.prBranch,
+      error,
+      retry_count: task.retryCount ?? 0,
+    })
+    .select()
+    .single<PersistedDeadLetterTask>();
+  if (dbError) {
+    console.error("[db] insertDeadLetterTask error:", dbError.message);
+    return undefined;
+  }
+  return data ? toDeadLetterTask(data) : undefined;
+}
+
+export async function listDeadLetterTasks(): Promise<DeadLetterTask[]> {
+  const supabase = getSupabase();
+  if (!supabase) return [...memoryDeadLetterTasks].reverse();
+  const { data, error } = await supabase
+    .from("dead_letter_tasks")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .returns<PersistedDeadLetterTask[]>();
+  if (error) {
+    console.error("[db] listDeadLetterTasks error:", error.message);
+    return [];
+  }
+  return (data ?? []).map(toDeadLetterTask);
+}
+
+export async function getDeadLetterTaskByTaskId(taskId: string): Promise<DeadLetterTask | undefined> {
+  const supabase = getSupabase();
+  if (!supabase) return memoryDeadLetterTasks.find((t) => t.taskId === taskId && !t.resolution);
+  const { data, error } = await supabase
+    .from("dead_letter_tasks")
+    .select("*")
+    .eq("task_id", taskId)
+    .maybeSingle<PersistedDeadLetterTask>();
+  if (error) {
+    console.error("[db] getDeadLetterTaskByTaskId error:", error.message);
+    return undefined;
+  }
+  return data ? toDeadLetterTask(data) : undefined;
+}
+
+export async function resolveDeadLetterTask(id: string, resolution: string): Promise<boolean> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    const dl = memoryDeadLetterTasks.find((t) => t.id === id);
+    if (dl) {
+      dl.resolvedAt = Date.now();
+      dl.resolution = resolution;
+    }
+    return true;
+  }
+  const { error } = await supabase
+    .from("dead_letter_tasks")
+    .update({ resolved_at: new Date().toISOString(), resolution })
+    .eq("id", id);
+  if (error) {
+    console.error("[db] resolveDeadLetterTask error:", error.message);
     return false;
   }
   return true;

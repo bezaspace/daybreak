@@ -3,6 +3,7 @@ import { CostDashboard } from "./CostDashboard.js";
 import { TraceView } from "./TraceView.js";
 import { TimeTravelView } from "./TimeTravelView.js";
 import { CiHealView } from "./CiHealView.js";
+import { DeadLetterView } from "./DeadLetterView.js";
 
 interface StreamEvent {
   id: string;
@@ -217,7 +218,7 @@ export function App() {
   const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
   const terminalRef = useRef<HTMLPreElement>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [view, setView] = useState<"run" | "trace" | "costs" | "time-travel" | "ci-heal">("run");
+  const [view, setView] = useState<"run" | "trace" | "costs" | "time-travel" | "ci-heal" | "dead-letter">("run");
 
   function loadTasks() {
     fetch("/api/tasks")
@@ -458,6 +459,9 @@ export function App() {
           <button type="button" disabled={view === "ci-heal"} onClick={() => setView("ci-heal")}>
             CI Heal
           </button>
+          <button type="button" disabled={view === "dead-letter"} onClick={() => setView("dead-letter")}>
+            Dead Letter
+          </button>
         </div>
       )}
 
@@ -476,6 +480,8 @@ export function App() {
       {view === "costs" && <CostDashboard />}
 
       {view === "ci-heal" && <CiHealView tasks={tasks} />}
+
+      {view === "dead-letter" && <DeadLetterView />}
 
       {view !== "run" ? null : screenshots.length > 0 && (
         <div style={{ marginBottom: "1rem" }}>

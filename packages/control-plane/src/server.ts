@@ -24,6 +24,9 @@ import {
   listCheckpoints,
   getCheckpoint,
   updateCheckpoint,
+  listDeadLetterTasks,
+  getDeadLetterTaskByTaskId,
+  resolveDeadLetterTask,
   type Task,
   type StreamEvent,
 } from "./db.js";
@@ -1093,6 +1096,41 @@ app.get("/api/queue/status", async (c) => {
     workerPending: queueStatus.pending,
     workerRunning: queueStatus.running,
   });
+});
+
+app.get("/api/dead-letter", async (c) => {
+  const items = await listDeadLetterTasks();
+  return c.json(items);
+});
+
+app.post("/api/dead-letter/:taskId/retry", async (c) => {
+  const taskId = c.req.param("taskId");
+  const dl = await getDeadLetterTaskByTaskId(taskId);
+  if (!dl) {
+    return c.json({ error: "dead letter task not found" }, 404);
+  }
+
+  const task = (await getTask(taskId)) ?? tasks.get(taskId);
+  if (task) {
+    task.status = "pending";
+    task.retryCount = 0;
+    task.nextRetryAt = undefined;
+    task.lastError = undefined;
+    task.endedAt = undefined;
+    tasks.set(task.id, task);
+    await updateTask(task.id, {
+      status: "pending",
+      retryCount: 0,
+      nextRetryAt: undefined,
+      lastError: undefined,
+      endedAt: undefined,
+    });
+  }
+
+  await resolveDeadLetterTask(dl.id, "retry");
+  await publishEvent(taskId, "task_retry", { fromDeadLetter: true, deadLetterId: dl.id });
+  queue.start();
+  return c.json({ ok: true, taskId }, 202);
 });
 
 app.post("/api/tasks", async (c) => {

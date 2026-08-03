@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import type { Task } from "./db.js";
 import { claimNextPendingTask, getSupabase, getTask, persistTask, updateTask } from "./db.js";
 import { IdempotencyStore, getExistingTask } from "./idempotency.js";
+import { RetryClassifier, RetryScheduler } from "./retry.js";
+import { insertDeadLetterTask } from "./db.js";
 
 export interface TaskSpec {
   repo: string;
@@ -26,6 +28,8 @@ export interface TaskSpec {
   maxWallClockMinutes?: number;
   metadata?: Record<string, unknown>;
   idempotencyKey?: string;
+  retryCount?: number;
+  maxRetries?: number;
 }
 
 export interface TaskQueueOptions {
@@ -35,6 +39,7 @@ export interface TaskQueueOptions {
   onEvent: (taskId: string, type: string, data: unknown) => Promise<void>;
   workerId?: string;
   idempotencyStore?: IdempotencyStore;
+  maxRetries?: number;
 }
 
 function buildTask(spec: TaskSpec): Task {
@@ -67,6 +72,8 @@ function buildTask(spec: TaskSpec): Task {
     maxWallClockMinutes: spec.maxWallClockMinutes,
     metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
     idempotencyKey: spec.idempotencyKey,
+    retryCount: spec.retryCount ?? 0,
+    maxRetries: spec.maxRetries ?? 2,
   };
 }
 
@@ -81,6 +88,7 @@ export class TaskQueue {
   private timer: NodeJS.Timeout | undefined;
   private processing = false;
   private idempotencyStore: IdempotencyStore;
+  private maxRetries: number;
 
   constructor(options: TaskQueueOptions) {
     this.maxConcurrent = Math.max(1, options.maxConcurrent);
@@ -89,10 +97,12 @@ export class TaskQueue {
     this.onEvent = options.onEvent;
     this.workerId = options.workerId ?? `worker-${randomUUID().slice(0, 8)}`;
     this.idempotencyStore = options.idempotencyStore ?? new IdempotencyStore();
+    this.maxRetries = options.maxRetries ?? 2;
   }
 
   async enqueue(spec: TaskSpec, options?: { idempotencyKey?: string }): Promise<Task> {
     const idempotencyKey = options?.idempotencyKey ?? spec.idempotencyKey;
+    const maxRetries = spec.maxRetries ?? this.maxRetries;
 
     if (idempotencyKey) {
       const existing = await this.idempotencyStore.get(idempotencyKey);
@@ -103,6 +113,7 @@ export class TaskQueue {
     }
 
     const task = buildTask(spec);
+    task.maxRetries = maxRetries;
 
     if (idempotencyKey) {
       const created = await this.idempotencyStore.tryCreate(idempotencyKey, task.id, task);
@@ -182,7 +193,12 @@ export class TaskQueue {
       return fromDb;
     }
     if (this.running.size < this.maxConcurrent && this.pending.length > 0) {
-      const task = this.pending.shift()!;
+      const now = Date.now();
+      const index = this.pending.findIndex(
+        (t) => t.status === "pending" || (t.status === "retry_scheduled" && (!t.nextRetryAt || t.nextRetryAt <= now)),
+      );
+      if (index < 0) return undefined;
+      const [task] = this.pending.splice(index, 1);
       task.status = "running";
       task.claimedAt = Date.now();
       await updateTask(task.id, { status: "running", claimedAt: task.claimedAt });
@@ -195,11 +211,41 @@ export class TaskQueue {
     Promise.resolve()
       .then(() => this.onClaim(task))
       .catch(async (error) => {
+        const message = error instanceof Error ? error.message : String(error);
         console.error(`[queue] task ${task.id} failed during claim/execution:`, error);
+
+        if (RetryClassifier.isRetryable(error, task.triggerSource, { task }) && (task.retryCount ?? 0) < (task.maxRetries ?? this.maxRetries)) {
+          task.retryCount = (task.retryCount ?? 0) + 1;
+          task.lastError = message;
+          task.nextRetryAt = RetryScheduler.nextRetryAt(task.retryCount);
+          task.status = "retry_scheduled";
+          task.endedAt = undefined;
+          await updateTask(task.id, {
+            retryCount: task.retryCount,
+            lastError: task.lastError,
+            nextRetryAt: task.nextRetryAt,
+            status: "retry_scheduled",
+            endedAt: undefined,
+          });
+          await this.onEvent(task.id, "task_retry_scheduled", {
+            retryCount: task.retryCount,
+            nextRetryAt: task.nextRetryAt,
+            error: message,
+          });
+          // Keep the task in memory for in-memory queue fallback.
+          if (!getSupabase()) {
+            this.pending.push(task);
+          }
+          return;
+        }
+
         task.status = "failed";
         task.endedAt = Date.now();
-        await updateTask(task.id, { status: "failed", endedAt: task.endedAt });
-        await this.onEvent(task.id, "task_failed", { error: error instanceof Error ? error.message : String(error) });
+        task.lastError = message;
+        await updateTask(task.id, { status: "failed", endedAt: task.endedAt, lastError: task.lastError });
+        await this.onEvent(task.id, "task_failed", { error: message });
+        await this.onEvent(task.id, "dead_letter", { error: message });
+        await insertDeadLetterTask(task, message);
       })
       .finally(() => {
         this.running.delete(task.id);
