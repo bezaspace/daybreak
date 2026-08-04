@@ -8,6 +8,8 @@
     "node": ">=22.0.0"
   },
   "scripts": {
+    "dev": "pnpm -r --parallel --if-present run dev",
+    "test:e2e": "pnpm --filter ui e2e",
     "spike": "pnpm --filter agent-runner spike",
     "eval": "pnpm --filter evals eval",
     "eval:e2e": "pnpm --filter evals eval:e2e",

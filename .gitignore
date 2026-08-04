@@ -12,3 +12,5 @@ dist/
 .idea/
 .daybreak/
 supabase/.temp/
+test-results/
+playwright-report/

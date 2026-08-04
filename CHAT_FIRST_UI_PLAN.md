@@ -328,12 +328,12 @@ Because this is a scope shift, the existing `UI_REVAMP_PLAN.md` milestones are r
 - [x] Mobile: bottom sheet for right panel, collapsible sidebar drawer.
 - [x] Offline/reconnect handling, unread indicators, notification toasts.
 
-### Phase 8 — Performance, tests, and local packaging
+### Phase 8 — Performance, tests, and local packaging (done)
 
-- Virtualized chat list.
-- Lazy load right-panel tabs.
-- E2E tests with Playwright for start-session → send message → approve tool → see PR URL.
-- Ensure full local run (control-plane + UI) without Cloudflare.
+- [x] Virtualized chat list.
+- [x] Lazy load right-panel tabs.
+- [x] E2E tests with Playwright for start-session → send message → approve tool → see PR URL.
+- [x] Ensure full local run (control-plane + UI) without Cloudflare.
 
 ---
 

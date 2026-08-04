@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Loader2, MessageSquare } from "lucide-react";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { MessageBubble } from "./MessageBubble.js";
 import type { ChatMessage, Task } from "../../lib/types.js";
 
@@ -11,11 +12,13 @@ interface ChatThreadProps {
 }
 
 export function ChatThread({ messages, isStreaming, task, onApprovalAction }: ChatThreadProps) {
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const virtuosoRef = useRef<VirtuosoHandle | null>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    if (messages.length > 0) {
+      virtuosoRef.current?.scrollToIndex({ index: messages.length - 1, behavior: "smooth", align: "end" });
+    }
+  }, [messages.length]);
 
   if (!task && messages.length === 0) {
     return (
@@ -31,22 +34,50 @@ export function ChatThread({ messages, isStreaming, task, onApprovalAction }: Ch
     );
   }
 
+  if (messages.length === 0) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center px-6 text-center text-sm text-db-text-secondary">
+        No messages yet.
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      <div className="flex-1 overflow-y-auto px-4 py-6 scrollbar-thin">
-        <div className="mx-auto max-w-3xl space-y-4">
-          {messages.map((message) => (
-            <MessageBubble key={message.id} message={message} taskId={task?.id} onApprovalAction={onApprovalAction} />
-          ))}
-          {isStreaming && (
-            <div className="flex items-center gap-2 px-4 text-sm text-db-text-tertiary">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Agent is working…
+      <Virtuoso
+        ref={(r) => {
+          virtuosoRef.current = r;
+        }}
+        data={messages}
+        followOutput="smooth"
+        initialTopMostItemIndex={Math.max(0, messages.length - 1)}
+        components={{
+          Footer: () =>
+            isStreaming ? (
+              <div className="mx-auto max-w-3xl px-4 py-3 text-sm text-db-text-tertiary">
+                <div className="flex items-center gap-2">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Agent is working…
+                </div>
+              </div>
+            ) : (
+              <div className="h-4" />
+            ),
+        }}
+        itemContent={(_index, message) => (
+          <div className="px-4 py-2">
+            <div className="mx-auto max-w-3xl">
+              <MessageBubble
+                message={message}
+                taskId={task?.id}
+                onApprovalAction={onApprovalAction}
+              />
             </div>
-          )}
-          <div ref={bottomRef} />
-        </div>
-      </div>
+          </div>
+        )}
+        style={{ height: "100%" }}
+        className="flex-1"
+      />
     </div>
   );
 }
