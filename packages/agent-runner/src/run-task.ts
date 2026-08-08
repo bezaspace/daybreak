@@ -393,7 +393,9 @@ async function main() {
           run(`cd "${targetDir}" && git branch -m ${prBranch}`, ".", "inherit");
         }
         console.log(pc.bold(`[run-task] pushing ${prBranch} to origin`));
-        run(`cd "${targetDir}" && git push -u origin ${prBranch}`, ".", "inherit");
+        const repoUrl = new URL(targetRepoUrl!);
+        const authRemoteUrl = `https://x-access-token:${process.env.GITHUB_TOKEN}@${repoUrl.host}${repoUrl.pathname}`;
+        run(`cd "${targetDir}" && git remote set-url origin "${authRemoteUrl}" && git push -u origin ${prBranch}`, ".", "inherit");
         publisher.publish("commit_pushed", { prBranch });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
