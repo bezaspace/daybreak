@@ -99,9 +99,12 @@ export class TaskRunner {
 
     const telemetry = initTelemetry({
       taskId: explicitTaskId,
+      mode: this.config.mode,
       publicKey: this.config.langfusePublicKey,
       secretKey: this.config.langfuseSecretKey,
-      baseUrl: this.config.langfuseBaseUrl,
+      apiKey: this.config.phoenixApiKey,
+      baseUrl: this.config.mode === "local" ? this.config.phoenixUrl : this.config.langfuseBaseUrl,
+      projectName: this.config.phoenixProject,
     });
     this.provider = telemetry.provider;
     this.tracer = telemetry.tracer;

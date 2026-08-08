@@ -18,10 +18,13 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "build": "pnpm -r build",
-    "clean": "pnpm -r clean"
+    "clean": "pnpm -r clean",
+    "local:up": "./scripts/local-up.sh",
+    "local:down": "./scripts/local-down.sh"
   },
   "devDependencies": {
     "@types/node": "^22.13.0",
+    "supabase": "^2.0.0",
     "tsx": "^4.23.1",
     "typescript": "^5.7.3"
   },

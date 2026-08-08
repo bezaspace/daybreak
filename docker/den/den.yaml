@@ -1,0 +1,21 @@
+server:
+  host: "127.0.0.1"
+  port: 8080
+
+runtime:
+  backend: "docker"
+  network_id: "den-net"
+  default_network_mode: "bridge"
+  allow_unsafe_bridge: true
+  platform_override: "linux-native-docker-co-resident"
+
+sandbox:
+  default_image: "ubuntu:22.04"
+  default_timeout: "30m"
+  max_sandboxes: 10
+  default_cpu: 1000000000
+  default_memory: 536870912
+
+log:
+  level: "info"
+  format: "text"

@@ -1,5 +1,5 @@
 import dotenv from "dotenv";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import type { AgentConfig, LlmPricingMap } from "./types.js";
@@ -66,6 +66,12 @@ export interface DaybreakConfig {
   maxFileReadLines: number;
   maxRepoCloneDepth: number;
   providerFailureThreshold: number;
+  mode: "cloud" | "local";
+  denUrl?: string;
+  denApiKey?: string;
+  phoenixUrl?: string;
+  phoenixProject?: string;
+  phoenixApiKey?: string;
 }
 
 const DEFAULT_MAX_TURNS = 40;
@@ -100,6 +106,7 @@ const DEFAULT_MAX_FILE_READ_BYTES = 200_000;
 const DEFAULT_MAX_FILE_READ_LINES = 5_000;
 const DEFAULT_MAX_REPO_CLONE_DEPTH = 0;
 const DEFAULT_PROVIDER_FAILURE_THRESHOLD = 3;
+const DEFAULT_MODE: "cloud" | "local" = "cloud";
 
 export const DEFAULT_DENYLIST_PATTERNS: string[] = [
   ".env",
@@ -140,6 +147,8 @@ function findEnvFile(): string {
   for (let i = 0; i < 10; i++) {
     const candidate = resolve(dir, ".env");
     if (existsSync(candidate)) return candidate;
+    const localCandidate = resolve(dir, ".env.local");
+    if (existsSync(localCandidate)) return localCandidate;
     const parent = resolve(dir, "..");
     if (parent === dir) break;
     dir = parent;
@@ -147,8 +156,40 @@ function findEnvFile(): string {
   return resolve(process.cwd(), ".env");
 }
 
+function loadEnvFiles(envPath?: string): void {
+  const envFile = envPath ? resolve(envPath) : findEnvFile();
+  // When only a .env.local exists, use it as the base file.
+  const isLocalOnly = envFile.endsWith(".env.local");
+  const localFile = isLocalOnly ? envFile : envFile.replace(/\.env$/, ".env.local");
+  // .env fills in missing keys but never overrides the system environment.
+  const systemKeys = new Set(Object.keys(process.env));
+  if (existsSync(envFile)) {
+    const parsed = dotenv.parse(readFileSync(envFile, "utf8"));
+    for (const [key, value] of Object.entries(parsed)) {
+      if (!systemKeys.has(key)) {
+        process.env[key] = value;
+      }
+    }
+  }
+  // .env.local is the local override and may replace system defaults (e.g.
+  // switching from cloud Upstash/Supabase credentials to local URLs).
+  if (existsSync(localFile) && localFile !== envFile) {
+    const parsed = dotenv.parse(readFileSync(localFile, "utf8"));
+    for (const [key, value] of Object.entries(parsed)) {
+      process.env[key] = value;
+    }
+  }
+  // If .env.local was the only file found, treat it as the local override.
+  if (isLocalOnly && existsSync(envFile)) {
+    const parsed = dotenv.parse(readFileSync(envFile, "utf8"));
+    for (const [key, value] of Object.entries(parsed)) {
+      process.env[key] = value;
+    }
+  }
+}
+
 export function loadConfig(envPath?: string): DaybreakConfig {
-  dotenv.config({ path: envPath ? resolve(envPath) : findEnvFile() });
+  loadEnvFiles(envPath);
 
   const get = (name: string): string | undefined => process.env[name];
   const requireString = (name: string): string => {
@@ -272,6 +313,12 @@ export function loadConfig(envPath?: string): DaybreakConfig {
     maxFileReadLines: parseIntEnv("DAYBREAK_MAX_FILE_READ_LINES", DEFAULT_MAX_FILE_READ_LINES),
     maxRepoCloneDepth: parseIntEnv("DAYBREAK_MAX_REPO_CLONE_DEPTH", DEFAULT_MAX_REPO_CLONE_DEPTH),
     providerFailureThreshold: parseIntEnv("DAYBREAK_PROVIDER_FAILURE_THRESHOLD", DEFAULT_PROVIDER_FAILURE_THRESHOLD),
+    mode: (get("DAYBREAK_MODE") as "cloud" | "local") || DEFAULT_MODE,
+    denUrl: get("DEN_URL"),
+    denApiKey: get("DEN_API_KEY"),
+    phoenixUrl: get("PHOENIX_URL"),
+    phoenixProject: get("PHOENIX_PROJECT") || "default",
+    phoenixApiKey: get("PHOENIX_API_KEY"),
   };
 }
 

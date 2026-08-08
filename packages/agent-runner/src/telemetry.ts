@@ -1,6 +1,6 @@
 import { context, diag, trace, type Span, type Tracer, type Context } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
-import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { TracerProvider, BatchSpanProcessor, SimpleSpanProcessor, ConsoleSpanExporter, type IdGenerator } from "@opentelemetry/sdk-trace";
 import { ATTR_SERVICE_NAME } from "@opentelemetry/semantic-conventions";
@@ -50,9 +50,12 @@ export interface TelemetryInit {
 
 export interface TelemetryOptions {
   taskId?: string;
+  mode?: "cloud" | "local";
   publicKey?: string;
   secretKey?: string;
+  apiKey?: string;
   baseUrl?: string;
+  projectName?: string;
   serviceName?: string;
 }
 
@@ -62,19 +65,22 @@ export function initTelemetry(options: TelemetryOptions): TelemetryInit {
   const taskId = options.taskId || randomUUID();
   const traceId = deriveTraceId(taskId);
 
-  const baseUrl = (options.baseUrl || "https://cloud.langfuse.com").replace(/\/+$/, "");
-  const publicKey = options.publicKey || "";
-  const secretKey = options.secretKey || "";
+  const mode = options.mode || "cloud";
+  const isLocal = mode === "local";
+  const baseUrl = (options.baseUrl || (isLocal ? "http://localhost:6006" : "https://cloud.langfuse.com")).replace(/\/+$/, "");
 
   let processor;
-  if (publicKey && secretKey) {
-    const auth = Buffer.from(`${publicKey}:${secretKey}`).toString("base64");
+  if (isLocal) {
+    if (!baseUrl) {
+      diag.warn("[telemetry] PHOENIX_URL missing; emitting spans to console instead of Phoenix.");
+    }
+    const headers: Record<string, string> = {};
+    if (options.apiKey) {
+      headers.Authorization = `Bearer ${options.apiKey}`;
+    }
     const exporter = new OTLPTraceExporter({
-      url: `${baseUrl}${LANGFUSE_OTLP_PATH}`,
-      headers: {
-        Authorization: `Basic ${auth}`,
-        "x-langfuse-ingestion-version": "4",
-      },
+      url: `${baseUrl}/v1/traces`,
+      headers,
       timeoutMillis: 15000,
     });
     processor = new BatchSpanProcessor({
@@ -85,15 +91,41 @@ export function initTelemetry(options: TelemetryOptions): TelemetryInit {
       exportTimeoutMillis: 15000,
     });
   } else {
-    diag.warn("[telemetry] LANGFUSE_PUBLIC_KEY/SECRET_KEY missing; emitting spans to console instead of Langfuse.");
-    processor = new SimpleSpanProcessor({ exporter: new ConsoleSpanExporter() });
+    const publicKey = options.publicKey || "";
+    const secretKey = options.secretKey || "";
+    if (publicKey && secretKey) {
+      const auth = Buffer.from(`${publicKey}:${secretKey}`).toString("base64");
+      const exporter = new OTLPTraceExporter({
+        url: `${baseUrl}${LANGFUSE_OTLP_PATH}`,
+        headers: {
+          Authorization: `Basic ${auth}`,
+          "x-langfuse-ingestion-version": "4",
+        },
+        timeoutMillis: 15000,
+      });
+      processor = new BatchSpanProcessor({
+        exporter,
+        maxQueueSize: 1000,
+        maxExportBatchSize: 100,
+        scheduledDelayMillis: 5000,
+        exportTimeoutMillis: 15000,
+      });
+    } else {
+      diag.warn("[telemetry] LANGFUSE_PUBLIC_KEY/SECRET_KEY missing; emitting spans to console instead of Langfuse.");
+      processor = new SimpleSpanProcessor({ exporter: new ConsoleSpanExporter() });
+    }
+  }
+
+  const resourceAttributes: Record<string, string> = {
+    [ATTR_SERVICE_NAME]: options.serviceName || SERVICE_NAME,
+    "task.id": taskId,
+  };
+  if (isLocal && options.projectName) {
+    resourceAttributes["openinference.project.name"] = options.projectName;
   }
 
   const provider = new TracerProvider({
-    resource: resourceFromAttributes({
-      [ATTR_SERVICE_NAME]: options.serviceName || SERVICE_NAME,
-      "task.id": taskId,
-    }),
+    resource: resourceFromAttributes(resourceAttributes),
     spanProcessors: [processor],
     idGenerator: new TaskIdGenerator(traceId),
   });

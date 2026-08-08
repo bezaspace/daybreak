@@ -64,6 +64,7 @@ export interface Config {
   sandboxIdleTtlMinutes?: number;
   dataRetentionDays?: number;
   cleanupEnabled?: boolean;
+  mode?: "cloud" | "local";
 }
 
 export interface QueueStatus {

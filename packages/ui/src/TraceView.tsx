@@ -41,6 +41,7 @@ interface TraceData {
 interface TraceResponse {
   trace: TraceData;
   traceUrl: string;
+  provider?: string;
 }
 
 interface TraceViewProps {
@@ -110,7 +111,7 @@ function ObservationRow({ node, depth }: { node: ObservationNode; depth: number 
   const tokens = getObservationTokens(node);
   const cost = getObservationCost(node);
   const model = getObservationModel(node);
-  const provider = getObservationProvider(node);
+  const observationProvider = getObservationProvider(node);
 
   return (
     <div style={{ marginLeft: depth * 16 }}>
@@ -126,7 +127,7 @@ function ObservationRow({ node, depth }: { node: ObservationNode; depth: number 
         </div>
         <div style={{ color: "#666", fontSize: 12 }}>
           {model ? `model: ${model}` : ""}
-          {provider ? ` · provider: ${provider}` : ""}
+          {observationProvider ? ` · provider: ${observationProvider}` : ""}
           {` · latency: ${formatDuration(node.startTime, node.endTime)}`}
           {tokens.total !== undefined && ` · tokens: ${tokens.input ?? 0}/${tokens.output ?? 0}/${tokens.total}`}
           {typeof cost === "number" && ` · cost: $${cost.toFixed(6)}`}
@@ -164,6 +165,8 @@ export function TraceView({ taskId, traceId, provider, costUsd }: TraceViewProps
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const traceProvider = response?.provider || provider || "Langfuse";
+
   useEffect(() => {
     fetch(`/api/tasks/${taskId}/trace`)
       .then(async (r) => {
@@ -188,12 +191,12 @@ export function TraceView({ taskId, traceId, provider, costUsd }: TraceViewProps
       <h2>Trace</h2>
       <div style={{ marginBottom: "1rem" }}>
         <code>{traceId}</code>
-        {provider ? ` · provider: ${provider}` : ""}
+        {traceProvider ? ` · provider: ${traceProvider}` : ""}
         {costUsd !== undefined ? ` · cost: $${costUsd.toFixed(4)}` : ""}
         {typeof trace.totalCost === "number" ? ` · Langfuse cost: $${trace.totalCost.toFixed(4)}` : ""}
         {" · "}
         <a href={response.traceUrl} target="_blank" rel="noopener noreferrer">
-          Open in Langfuse
+          Open in {traceProvider === "phoenix" ? "Phoenix" : "Langfuse"}
         </a>
       </div>
       {tree.map((node) => (

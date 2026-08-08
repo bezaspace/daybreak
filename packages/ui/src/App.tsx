@@ -496,7 +496,7 @@ export function App() {
           <TraceView
             taskId={selectedTask.id}
             traceId={selectedTask.traceId}
-            provider={selectedTask.provider}
+            provider={config?.mode === "local" ? "phoenix" : "langfuse"}
             costUsd={selectedTask.costUsd}
           />
         ) : activeView === "trace" ? (
@@ -514,7 +514,7 @@ export function App() {
 
         {config && activeView !== "run" && (
           <div className="mt-4 text-xs text-db-text-secondary">
-            Circuit breakers: {config.maxTurns} turns · {config.maxWallClockMinutes} min · ${config.maxCostUsd} ·
+            Mode: {config.mode ?? "cloud"} · Circuit breakers: {config.maxTurns} turns · {config.maxWallClockMinutes} min · ${config.maxCostUsd} ·
             compaction {config.compactionEnabled ? "on" : "off"}
             {config.e2bTemplate ? ` · template ${config.e2bTemplate}` : ""} · max concurrency {config.maxConcurrentTasks}
             · cleanup {config.cleanupEnabled ? "on" : "off"} ({config.branchTtlDays}d / {config.sandboxIdleTtlMinutes}m / {config.dataRetentionDays}d)

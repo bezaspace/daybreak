@@ -35,6 +35,7 @@ const config: DaybreakConfig = {
   maxFileReadLines: 5_000,
   maxRepoCloneDepth: 0,
   providerFailureThreshold: 3,
+  mode: "cloud",
 };
 
 describe("isSensitivePath", () => {

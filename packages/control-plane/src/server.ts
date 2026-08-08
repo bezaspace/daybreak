@@ -4,6 +4,8 @@ import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
 import { loadConfig, redactSecrets } from "@daybreak/shared";
+import { Den } from "@us4/den";
+import type { FileInfo } from "@us4/den";
 import { getRedis } from "./redis.js";
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
@@ -125,6 +127,25 @@ function langfuseBasicAuthHeader(): string | undefined {
 function langfuseBaseUrl(): string {
   const config = loadConfig();
   return config.langfuseBaseUrl || process.env.LANGFUSE_BASE_URL || "https://cloud.langfuse.com";
+}
+
+function phoenixBaseUrl(): string {
+  const config = loadConfig();
+  return config.phoenixUrl || process.env.PHOENIX_URL || "http://localhost:6006";
+}
+
+function phoenixProject(): string {
+  const config = loadConfig();
+  return config.phoenixProject || process.env.PHOENIX_PROJECT || "default";
+}
+
+function phoenixApiHeaders(): Record<string, string> {
+  const config = loadConfig();
+  const apiKey = config.phoenixApiKey || process.env.PHOENIX_API_KEY;
+  if (apiKey) {
+    return { Authorization: `Bearer ${apiKey}` };
+  }
+  return {};
 }
 
 async function publishToRedis(taskId: string, event: StreamEvent) {
@@ -562,36 +583,26 @@ async function spawnFork(
     } else {
       const sandboxId = await resolveParentSandboxId(parent);
       if (!sandboxId) {
-        throw new Error(`Cannot create E2B snapshot: parent sandbox id not found for ${parent.id}`);
+        throw new Error(`Cannot create snapshot: parent sandbox id not found for ${parent.id}`);
       }
-      console.log(`[control-plane] creating E2B snapshot from sandbox ${sandboxId} for fork ${child.id}...`);
-      const Sandbox = await getE2BSandboxClass();
-      const snapshot = await Sandbox.createSnapshot(sandboxId, { apiKey: config.e2bApiKey });
-      e2bSnapshotId = snapshot.snapshotId;
+      if (config.mode === "local") {
+        console.log(`[control-plane] creating Den snapshot from sandbox ${sandboxId} for fork ${child.id}...`);
+        const den = new Den({ url: config.denUrl || process.env.DEN_URL || "http://localhost:8080", apiKey: config.denApiKey || process.env.DEN_API_KEY || "" });
+        const sandbox = await den.sandbox.get(sandboxId);
+        const snapshot = await sandbox.snapshot("fork");
+        e2bSnapshotId = snapshot.id;
+      } else {
+        console.log(`[control-plane] creating E2B snapshot from sandbox ${sandboxId} for fork ${child.id}...`);
+        const Sandbox = await getE2BSandboxClass();
+        const snapshot = await Sandbox.createSnapshot(sandboxId, { apiKey: config.e2bApiKey });
+        e2bSnapshotId = snapshot.snapshotId;
+      }
       console.log(`[control-plane] snapshot created: ${e2bSnapshotId}`);
     }
   }
 
   const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    E2B_TEMPLATE: config.e2bTemplate || "base",
-    TASK_ID: child.id,
-    PR_BRANCH_NAME: child.prBranch,
-    UPSTASH_REDIS_REST_URL: config.upstashRedisRestUrl || process.env.UPSTASH_REDIS_REST_URL || "",
-    UPSTASH_REDIS_TOKEN: config.upstashRedisToken || process.env.UPSTASH_REDIS_TOKEN || "",
-    LANGFUSE_PUBLIC_KEY: config.langfusePublicKey || process.env.LANGFUSE_PUBLIC_KEY || "",
-    LANGFUSE_SECRET_KEY: config.langfuseSecretKey || process.env.LANGFUSE_SECRET_KEY || "",
-    LANGFUSE_BASE_URL: config.langfuseBaseUrl || process.env.LANGFUSE_BASE_URL || "",
-    MAX_TURNS: String(config.maxTurns),
-    MAX_WALL_CLOCK_MINUTES: String(config.maxWallClockMinutes),
-    MAX_COST_USD: String(config.maxCostUsd),
-    COMPACTION_ENABLED: String(config.compactionEnabled),
-    COMPACTION_RESERVE_TOKENS: String(config.compactionReserveTokens),
-    COMPACTION_KEEP_RECENT_TOKENS: String(config.compactionKeepRecentTokens),
-    DAYBREAK_MAX_FILE_READ_BYTES: String(config.maxFileReadBytes),
-    DAYBREAK_MAX_FILE_READ_LINES: String(config.maxFileReadLines),
-    DAYBREAK_MAX_REPO_CLONE_DEPTH: String(config.maxRepoCloneDepth),
-    DAYBREAK_PROVIDER_FAILURE_THRESHOLD: String(config.providerFailureThreshold),
+    ...buildSpawnEnv(child.id, child.prBranch, child.repo, child.branch),
     TASK_PROMPT: prompt,
     FORK_SOURCE_BRANCH: parent.prBranch,
     AUTO_APPROVE: childMode === "autopilot" ? "true" : (childMode ? "false" : "true"),
@@ -705,6 +716,11 @@ async function validatePat(repoUrl: string, token: string): Promise<{ ok: boolea
 
 async function killSandbox(sandboxId: string): Promise<boolean> {
   try {
+    if (config.mode === "local") {
+      const den = new Den({ url: config.denUrl || process.env.DEN_URL || "http://localhost:8080", apiKey: config.denApiKey || process.env.DEN_API_KEY || "" });
+      await den.sandbox.destroy(sandboxId);
+      return true;
+    }
     const Sandbox = await getE2BSandboxClass();
     return await Sandbox.kill(sandboxId, { apiKey: config.e2bApiKey });
   } catch (error) {
@@ -806,6 +822,14 @@ function buildSpawnEnv(taskId: string, prBranch: string, repo: string, branch: s
     GITHUB_TOKEN: config.githubToken || "",
     TARGET_REPO_URL: repo,
     TARGET_BRANCH: branch,
+    DAYBREAK_MODE: config.mode,
+    DEN_URL: config.denUrl || process.env.DEN_URL || "",
+    DEN_API_KEY: config.denApiKey || process.env.DEN_API_KEY || "",
+    PHOENIX_URL: config.phoenixUrl || process.env.PHOENIX_URL || "",
+    PHOENIX_PROJECT: config.phoenixProject || process.env.PHOENIX_PROJECT || "default",
+    PHOENIX_API_KEY: config.phoenixApiKey || process.env.PHOENIX_API_KEY || "",
+    SUPABASE_URL: config.supabaseUrl || process.env.SUPABASE_URL || "",
+    SUPABASE_SERVICE_KEY: config.supabaseServiceKey || process.env.SUPABASE_SERVICE_KEY || "",
   };
 }
 
@@ -1106,6 +1130,7 @@ app.get("/api/config", (c) => {
     sandboxIdleTtlMinutes: config.sandboxIdleTtlMinutes,
     dataRetentionDays: config.dataRetentionDays,
     cleanupEnabled: config.cleanupEnabled,
+    mode: config.mode,
   });
 });
 
@@ -1759,13 +1784,10 @@ app.get("/api/checkpoints/:id", async (c) => {
 
 app.get("/api/tasks/:id/files", async (c) => {
   const id = c.req.param("id");
-  const path = c.req.query("path") || "/home/user/target";
+  const defaultPath = config.mode === "local" ? "/home/sandbox/target" : "/home/user/target";
+  const path = c.req.query("path") || defaultPath;
   const task = tasks.get(id) ?? (await getTask(id));
   if (!task) return c.json({ error: "task not found" }, 404);
-
-  if (!config.e2bApiKey) {
-    return c.json({ error: "E2B_API_KEY not configured" }, 503);
-  }
 
   const sandboxId = await resolveTaskSandboxId(task);
   if (!sandboxId) {
@@ -1773,6 +1795,22 @@ app.get("/api/tasks/:id/files", async (c) => {
   }
 
   try {
+    if (config.mode === "local") {
+      const den = new Den({ url: config.denUrl || process.env.DEN_URL || "http://localhost:8080", apiKey: config.denApiKey || process.env.DEN_API_KEY || "" });
+      const sandbox = await den.sandbox.get(sandboxId);
+      const rawEntries = (await sandbox.listFiles(path)) as Array<FileInfo>;
+      const entries = rawEntries.map((entry) => ({
+        name: entry.name,
+        path: entry.path,
+        type: entry.is_dir ? "dir" : "file",
+        size: entry.size,
+      }));
+      return c.json({ path, entries });
+    }
+
+    if (!config.e2bApiKey) {
+      return c.json({ error: "E2B_API_KEY not configured" }, 503);
+    }
     const Sandbox = await getE2BSandboxClass();
     const sandbox = await Sandbox.connect(sandboxId, { apiKey: config.e2bApiKey });
     const entries = await sandbox.files.list(path);
@@ -1991,6 +2029,57 @@ app.get("/api/tasks/:id/trace", async (c) => {
   }
 
   const redirect = c.req.query("redirect") === "1";
+
+  if (config.mode === "local") {
+    const baseUrl = phoenixBaseUrl();
+    const project = phoenixProject();
+    const traceUrl = `${baseUrl}/redirects/traces/${task.traceId}`;
+
+    if (redirect) {
+      return c.redirect(traceUrl);
+    }
+
+    const res = await fetch(
+      `${baseUrl}/v1/projects/${encodeURIComponent(project)}/spans?trace_id=${encodeURIComponent(task.traceId)}&limit=1000`,
+      { headers: phoenixApiHeaders() },
+    );
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "unknown");
+      console.error(`[control-plane] trace fetch failed: ${res.status} ${text}`);
+      return c.json({ error: "failed to fetch trace from Phoenix" }, 502);
+    }
+
+    const data = (await res.json()) as {
+      data?: Array<{
+        span_id: string;
+        parent_id?: string | null;
+        name: string;
+        span_kind?: string;
+        start_time?: string;
+        end_time?: string;
+        attributes?: Record<string, unknown>;
+      }>;
+    };
+    const spans = data.data || [];
+    const observations = spans.map((span) => ({
+      id: span.span_id,
+      name: span.name,
+      type: span.span_kind,
+      parentObservationId: span.parent_id ?? null,
+      startTime: span.start_time,
+      endTime: span.end_time,
+      metadata: span.attributes,
+    }));
+
+    const trace = {
+      id: task.traceId,
+      name: "daybreak-agent",
+      observations,
+    };
+    return c.json({ trace, traceUrl, provider: "phoenix" });
+  }
+
   const baseUrl = langfuseBaseUrl();
   const traceUrl = new URL(`/trace/${task.traceId}`, baseUrl).toString();
 
@@ -2014,7 +2103,7 @@ app.get("/api/tasks/:id/trace", async (c) => {
   }
 
   const trace = (await res.json()) as Record<string, unknown>;
-  return c.json({ trace, traceUrl });
+  return c.json({ trace, traceUrl, provider: "langfuse" });
 });
 
 app.get("/api/tasks/:id/logs", async (c) => {
