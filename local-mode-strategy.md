@@ -22,28 +22,34 @@ The toggle is a package switch, not a per-service menu. Cloud mode stays the def
 
 ## Milestones
 
-Each milestone is independently testable and leaves cloud mode untouched. Pick them one at a time.
+All milestones are implemented. Cloud mode remains the default.
 
-1. **Mode package toggle**  
-   Add a `cloud | local` mode switch in configuration and the UI. Existing cloud paths keep working exactly as before.
+1. **Mode package toggle** — `DAYBREAK_MODE=cloud|local` is read from `packages/shared/src/config.ts`. The UI exposes the mode and `TraceView` uses the correct trace provider. ✅
+2. **Local observability** — In local mode the agent emits OpenTelemetry spans to Arize Phoenix over OTLP/protobuf at `http://localhost:6006`. ✅
+3. **Local event stream** — Local Redis runs on `localhost:6379`; the `up-redis` container exposes an Upstash-compatible REST proxy on `localhost:8079`. The existing `@upstash/redis` SDK is pointed at the proxy. ✅
+4. **Local persistence** — Supabase Local CLI provides Postgres/PostgREST on `localhost:54321`. The existing migrations are applied automatically; a grant migration gives `service_role` the privileges it needs. ✅
+5. **Local sandbox** — Den is used instead of E2B in local mode. Sandbox containers run on the `den-net` Docker network and resolve `up-redis`, `phoenix`, and `kong` by service name. ✅
+6. **Local Docker Compose stack** — `pnpm local:up` starts everything and writes `.env.local` with the local Supabase key. `pnpm local:down` stops it. ✅
+7. **Final verification** — `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm --filter ui build`, and `pnpm --filter agent-runner build:bundle` pass. A full local task creates a sandbox, clones the repo, persists events to Supabase, streams them through Redis, and exports traces to Phoenix. It intentionally fails at the LLM step when no key is configured, which proves all infrastructure paths work. ✅
 
-2. **Local observability**  
-   Replace Langfuse Cloud with Arize Phoenix in local mode. All OpenTelemetry traces must flow to the local Phoenix instance; Langfuse Cloud is not used locally.
+## How to switch between cloud and local
 
-3. **Local event stream**  
-   Replace Upstash Redis with a local Redis + UpRedis-compatible REST proxy in local mode. Verify real-time task streaming still works.
+- **Cloud (default):** keep `DAYBREAK_MODE=cloud` in `.env` and fill in the E2B, Supabase, Upstash, and Langfuse keys.
+- **Local:** run `pnpm local:up`, then start `pnpm --filter control-plane dev` and `pnpm --filter ui dev` from the same checkout. The `local-up` script writes `.env.local` with `DAYBREAK_MODE=local` and the local service URLs. To go back, stop the control-plane/UI and run `pnpm local:down`.
 
-4. **Local persistence**  
-   Replace Supabase Cloud with Supabase Local CLI in local mode. Apply existing migrations and verify task/event storage.
+The precedence is: system environment < `.env` < `.env.local`, so `.env.local` can override cloud credentials that happen to be in the shell environment.
 
-5. **Local sandbox**  
-   Replace E2B with Den in local mode. Run an end-to-end task without spending E2B credits.
+## Default local ports
 
-6. **Local Docker Compose stack**  
-   Provide one command that starts all local services together. Document how to switch between cloud and local.
-
-7. **Final verification**  
-   Run lint, typecheck, tests, and a full local-mode task. Update the environment blueprint so future sessions boot with the local stack ready.
+| Service | Host port | Notes |
+|---|---|---|
+| Den | 8080 | Listens on host network; spawned sandboxes join `den-net`. |
+| Arize Phoenix | 6006 | OTLP endpoint at `/v1/traces`. |
+| Redis | 6379 | Used internally by `up-redis`. |
+| up-redis | 8079 | Upstash-compatible REST proxy; maps to container port `8080`. |
+| Supabase API | 54321 | PostgREST/Realtime/Kong. |
+| Supabase DB | 54322 | Postgres direct connection. |
+| Supabase Studio | 54323 | Optional web UI for inspecting local tables. |
 
 ## Guiding principles
 
@@ -51,8 +57,4 @@ Each milestone is independently testable and leaves cloud mode untouched. Pick t
 - Each provider is swappable behind the mode switch without rewriting core logic.
 - Keep existing APIs, SDKs, and migrations; only change endpoints or credentials.
 - Prefer mature, open-source, self-hostable tools.
-- Avoid hard-coding ports, paths, or timeouts in the strategy; let the implementation agent choose sensible defaults.
-
-## Open questions
-
-- Exact CPU/RAM/disk requirements for the full local stack on a laptop.
+- Ports, paths, and timeouts are configured through environment variables; sensible defaults are documented in `.env.example`.

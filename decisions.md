@@ -531,8 +531,9 @@
 **Rationale:** A single switch prevents accidental hybrid configurations that still consume cloud quotas, and it keeps the UI and configuration model simple. During heavy testing the whole stack can be pointed locally with one change.
 
 **Consequences:**
-- `packages/shared/src/config.ts` gains a `mode` field and provider URLs/credentials that vary by mode.
+- `packages/shared/src/config.ts` gains a `mode` field and provider URLs/credentials that vary by mode. The precedence is system env < `.env` < `.env.local`, so a generated `.env.local` can override cloud credentials that happen to be in the shell.
 - The control plane and agent runner select provider implementations based on `mode`.
+- `scripts/local-up.sh` writes `.env.local` with `DAYBREAK_MODE=local` and the local service URLs.
 - Cloud mode remains the default so existing deployments are unaffected.
 
 ---
@@ -544,7 +545,8 @@
 **Rationale:** Den is a single-binary, Docker-backed sandbox with a TypeScript SDK and a REST API designed as a drop-in E2B alternative. It avoids E2B credit consumption during development and testing.
 
 **Consequences:**
-- `packages/agent-runner` gains a Den-backed sandbox implementation alongside `sandbox.ts`.
+- `packages/agent-runner/src/sandbox.ts` gains a Den-backed sandbox adapter that is selected when `DAYBREAK_MODE=local`. The E2B path remains the cloud-mode default.
+- Den creates containers on the `den-net` Docker network so spawned sandboxes can resolve the local `up-redis`, `phoenix`, and `kong` services by name.
 - Local Docker Compose includes a Den service.
 
 ---
@@ -556,8 +558,9 @@
 **Rationale:** The existing Supabase SDK, migrations, and table schemas remain unchanged. Supabase Local CLI is the closest local equivalent to Supabase Cloud, so the migration from local dev to hosted production stays trivial.
 
 **Consequences:**
-- Local Docker Compose (or a Supabase-managed set of containers) provides Postgres and the Supabase services.
-- `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` in local mode point to the local CLI endpoints.
+- Supabase Local CLI (`npx supabase start`) is wrapped by `scripts/local-up.sh` and provides Postgres, PostgREST, Realtime, and Studio on the `den-net` Docker network.
+- The existing migrations in `supabase/migrations` are applied automatically; an additional migration grants `service_role` the privileges required to read/write tasks and events.
+- `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` in local mode point to the local CLI endpoints and are written to `.env.local` by `pnpm local:up`.
 - No Supabase Cloud storage or row limits are consumed during local testing.
 
 ---
@@ -569,9 +572,10 @@
 **Rationale:** The proxy implements the Upstash Redis REST API, so the existing Redis code paths and SDK calls work without rewriting. This avoids the 500K command/month free-tier cap during heavy testing.
 
 **Consequences:**
-- Local Docker Compose includes `redis` and the REST proxy.
-- `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_TOKEN` point to the local proxy.
-- If the proxy has compatibility gaps, we can later switch to a native Redis client, but that is a larger change.
+- `docker-compose.local.yml` includes a `redis` container and an `up-redis` container that exposes the Upstash-compatible REST API on host port `8079` (container port `8080`).
+- The existing `@upstash/redis` client in the control plane and agent runner is pointed at `http://localhost:8079` with a local token; no code changes were required.
+- Spawning sandboxes receive `SANDBOX_UPSTASH_REDIS_REST_URL=http://up-redis:8080` because they run inside the `den-net` network.
+- The proxy is sufficient for event streaming; if compatibility gaps appear, a native Redis client is a fallback.
 
 ---
 
@@ -582,8 +586,8 @@
 **Rationale:** Langfuse Cloud's free trace tier is small for heavy testing, and self-hosted Langfuse requires ClickHouse, Postgres, and Redis — a heavy local footprint. Arize Phoenix is open-source, runs in Docker, supports OpenTelemetry ingestion, and provides trace/cost views with a smaller resource footprint.
 
 **Consequences:**
-- The OTel exporter endpoint switches to Phoenix whenever `DAYBREAK_MODE=local`.
-- The existing Langfuse trace-tree UI may need a Phoenix-compatible adapter, or Phoenix's own UI can be used during local development.
+- The OTel exporter endpoint switches to Phoenix whenever `DAYBREAK_MODE=local`, using OTLP/protobuf.
+- The UI `TraceView` fetches traces from Phoenix in local mode and from Langfuse in cloud mode; the trace provider is selected by `DAYBREAK_MODE`.
 - Local Docker Compose includes the Phoenix container, so the local stack has end-to-end observability without Langfuse Cloud quotas.
 
 ---
@@ -596,7 +600,7 @@ This appendix merges the operational reference from the former `docs/SECRETS.md`
 
 | Environment | Use case | Storage |
 |-------------|----------|---------|
-| Local development (Phase 0) | Running the agent spike and evals | `.env` file loaded by `dotenv` |
+| Local development (Phase 0) | Running the agent spike and evals | `.env` file loaded by `dotenv`; `pnpm local:up` writes `.env.local` with local service URLs |
 | CI (GitHub Actions) | Lint, typecheck, tests | Repository `Secrets` / `Variables` |
 | Cloudflare Workers | Control plane, GitHub App, queue, UI | `wrangler secret` / `wrangler.toml` vars (non-sensitive only) |
 | E2B | Sandbox API key | Cloudflare secret, passed to the sandbox at creation time |
@@ -608,10 +612,11 @@ This appendix merges the operational reference from the former `docs/SECRETS.md`
 - `LLM_API_KEY` and `LLM_FALLBACK_API_KEY` — primary and fallback OpenAI-compatible API keys.
 - Rotate keys through the provider dashboard. Use `LLM_FALLBACK_*` so the agent can degrade gracefully on rate limits.
 
-### E2B
-- `E2B_API_KEY` — create/destroy sandboxes.
-- `E2B_TEMPLATE` — optional sandbox template name. The built-in `daybreak-browser` template ships Node 22, Chromium, and `playwright-core` for the browser tool. Leave unset or set to `base` for the default template.
-- The agent should never read this from inside a sandbox. The control plane injects a short-lived sandbox API key only when spawning a workspace.
+### E2B / Den
+- `E2B_API_KEY` — create/destroy E2B sandboxes in `cloud` mode.
+- `E2B_TEMPLATE` — optional E2B sandbox template name. The built-in `daybreak-browser` template ships Node 22, Chromium, and `playwright-core` for the browser tool. Leave unset or set to `base` for the default template.
+- In `local` mode the agent runner uses Den instead of E2B. The Den server runs inside Docker Compose and `DEN_URL` points to `http://localhost:8080` by default. No API key is required.
+- The agent should never read the E2B key from inside a sandbox. The control plane injects a short-lived sandbox API key only when spawning a workspace.
 
 ### GitHub
 - `GITHUB_TOKEN` — a Personal Access Token (PAT) for Phase 3 and Phase 5. It must have `contents:write` and `pull_requests:write` on every repo Daybreak touches. Phase 5 additionally requires `actions:read` and `checks:read` to fetch failed CI job logs and annotations (these are usually included in the `repo` scope of a classic PAT). For fine-grained PATs, grant `Contents`, `Pull requests`, `Actions`, and `Checks` read/write on the selected repos.
@@ -639,9 +644,9 @@ Copy the tunnel URL (e.g. `https://<random>.trycloudflare.com`) and add it as a 
 6. Ensure the repo is in `GITHUB_WEBHOOK_REPO_ALLOWLIST`.
 
 ### Redis / Supabase / Langfuse
-- `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_TOKEN` are high-sensitivity; the sandbox uses them to publish the event stream and the control plane uses them to read it back.
-- `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` are high-sensitivity and are used by the control plane to persist tasks and events.
-- Langfuse keys (`LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL`) are lower risk but still kept out of source control.
+- `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_TOKEN` are high-sensitivity; the sandbox uses them to publish the event stream and the control plane uses them to read it back. In `local` mode these point to the `up-redis` REST proxy started by `pnpm local:up`.
+- `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` are high-sensitivity and are used by the control plane to persist tasks and events. In `local` mode `pnpm local:up` writes the local Supabase Local CLI credentials to `.env.local`.
+- Langfuse keys (`LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL`) are lower risk but still kept out of source control. In `local` mode traces are sent to Arize Phoenix at `PHOENIX_URL` instead; `LANGFUSE_*` keys are ignored.
 
 ## Phase 6 runtime configuration
 
