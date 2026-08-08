@@ -28,7 +28,7 @@ Each milestone is independently testable and leaves cloud mode untouched. Pick t
    Add a `cloud | local` mode switch in configuration and the UI. Existing cloud paths keep working exactly as before.
 
 2. **Local observability**  
-   Route OpenTelemetry traces to Arize Phoenix in local mode. Verify traces still appear for local runs.
+   Replace Langfuse Cloud with Arize Phoenix in local mode. All OpenTelemetry traces must flow to the local Phoenix instance; Langfuse Cloud is not used locally.
 
 3. **Local event stream**  
    Replace Upstash Redis with a local Redis + UpRedis-compatible REST proxy in local mode. Verify real-time task streaming still works.
@@ -56,5 +56,4 @@ Each milestone is independently testable and leaves cloud mode untouched. Pick t
 ## Open questions
 
 - Den is the first-choice sandbox; Daytona is the fallback if Den proves immature.
-- Whether to keep Langfuse on cloud and defer self-hosted traces until later.
 - Exact CPU/RAM/disk requirements for the full local stack on a laptop.

@@ -578,14 +578,14 @@
 
 ## D46. Local observability: Arize Phoenix
 
-**Decision:** Replace Langfuse Cloud with self-hosted Arize Phoenix for local-mode observability. Langfuse Cloud remains the cloud-mode default.
+**Decision:** Replace Langfuse Cloud with self-hosted Arize Phoenix for local-mode observability. In local mode Arize Phoenix is required, not optional; Langfuse Cloud is only used in cloud mode.
 
 **Rationale:** Langfuse Cloud's free trace tier is small for heavy testing, and self-hosted Langfuse requires ClickHouse, Postgres, and Redis — a heavy local footprint. Arize Phoenix is open-source, runs in Docker, supports OpenTelemetry ingestion, and provides trace/cost views with a smaller resource footprint.
 
 **Consequences:**
-- The OTel exporter endpoint switches to Phoenix in local mode.
+- The OTel exporter endpoint switches to Phoenix whenever `DAYBREAK_MODE=local`.
 - The existing Langfuse trace-tree UI may need a Phoenix-compatible adapter, or Phoenix's own UI can be used during local development.
-- If Phoenix does not cover a needed Langfuse feature, we can reconsider self-hosted Langfuse or sampling in cloud mode.
+- Local Docker Compose includes the Phoenix container, so the local stack has end-to-end observability without Langfuse Cloud quotas.
 
 ---
 
