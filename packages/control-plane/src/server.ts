@@ -41,6 +41,7 @@ import { createIdempotencyKey, IdempotencyStore } from "./idempotency.js";
 import { TaskRejectedError } from "./errors.js";
 import { TenantService, type Tenant } from "./tenants.js";
 import { CleanupService, type CleanupResult } from "./cleanup.js";
+import { listInstallationRepos, type GithubRepo } from "./github-app.js";
 
 const repoRoot = resolve(import.meta.dirname ?? process.cwd(), "../..");
 
@@ -1108,14 +1109,31 @@ app.get("/api/config", (c) => {
   });
 });
 
-app.get("/api/repos", (c) => {
+app.get("/api/repos", async (c) => {
+  // Try GitHub App installation repos first
+  const installationRepos = await listInstallationRepos(config);
+  if (installationRepos && installationRepos.length > 0) {
+    return c.json({
+      repos: installationRepos.map((r) => ({
+        fullName: r.fullName,
+        url: r.url,
+        owner: r.owner,
+        name: r.name,
+        defaultBranch: r.defaultBranch,
+        private: r.private,
+      })),
+      source: "github_app",
+    });
+  }
+
+  // Fallback to static allowlist from env
   const allowlist = config.githubWebhookRepoAllowlist || "";
   const patterns = allowlist.split(",").map((s) => s.trim()).filter(Boolean);
   const repos = patterns.map((p) => {
     const [owner, name] = p.split("/");
     return { fullName: p, url: `https://github.com/${p}`, owner: owner || "", name: name || "" };
   });
-  return c.json({ repos });
+  return c.json({ repos, source: "allowlist" });
 });
 
 app.get("/api/repos/:owner/:repo/issues-prs", async (c) => {
@@ -1604,7 +1622,7 @@ app.get("/api/tasks/:id", async (c) => {
   const id = c.req.param("id");
   const db = await getTask(id);
   const task = db ?? tasks.get(id);
-  if (!task) return c.json({ error: "task not found" }, 404);
+  if (!task || task.deletedAt) return c.json({ error: "task not found" }, 404);
   return c.json(task);
 });
 
@@ -1624,8 +1642,21 @@ app.post("/api/tasks/:id/unarchive", async (c) => {
 
 app.delete("/api/tasks/:id", async (c) => {
   const id = c.req.param("id");
-  const ok = await updateTask(id, { deletedAt: Date.now() });
+  const task = tasks.get(id) ?? (await getTask(id));
+  // Set status to cancelled so the queue worker doesn't resurrect it as pending
+  const updates: Parameters<typeof updateTask>[1] = { deletedAt: Date.now() };
+  if (task && task.status !== "complete" && task.status !== "failed" && task.status !== "abandoned" && task.status !== "cancelled") {
+    updates.status = "cancelled";
+    updates.endedAt = Date.now();
+    if (task.status === "pending") queue.cancel(id);
+  }
+  const ok = await updateTask(id, updates);
   if (!ok) return c.json({ error: "failed to delete task" }, 503);
+  if (task) {
+    task.status = (updates.status as Task["status"]) ?? task.status;
+    task.deletedAt = updates.deletedAt;
+    tasks.set(task.id, task);
+  }
   return c.json({ ok: true });
 });
 

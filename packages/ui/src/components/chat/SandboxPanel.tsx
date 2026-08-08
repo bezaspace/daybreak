@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   PanelRight,
   Terminal,
@@ -122,6 +122,56 @@ export function SandboxPanel({
   const [activeTab, setActiveTab] = useState<TabId>("terminal");
   const [collapsed, setCollapsed] = useState(false);
 
+  const PANEL_MIN = 320;
+  const PANEL_MAX = 720;
+  const PANEL_STORAGE_KEY = "daybreak.sandboxPanelWidth";
+  const [panelWidth, setPanelWidth] = useState<number>(() => {
+    if (typeof window === "undefined") return 384;
+    const stored = window.localStorage.getItem(PANEL_STORAGE_KEY);
+    const parsed = stored ? Number.parseInt(stored, 10) : NaN;
+    return Number.isFinite(parsed) && parsed >= PANEL_MIN && parsed <= PANEL_MAX ? parsed : 384;
+  });
+  const draggingRef = useRef(false);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const handleDragStart = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      draggingRef.current = true;
+      setIsDragging(true);
+      const startX = e.clientX;
+      const startWidth = panelWidth;
+      const onMove = (ev: PointerEvent) => {
+        if (!draggingRef.current) return;
+        const delta = startX - ev.clientX;
+        const next = Math.max(PANEL_MIN, Math.min(PANEL_MAX, startWidth + delta));
+        setPanelWidth(next);
+      };
+      const onUp = () => {
+        if (!draggingRef.current) return;
+        draggingRef.current = false;
+        setIsDragging(false);
+        document.removeEventListener("pointermove", onMove);
+        document.removeEventListener("pointerup", onUp);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        setPanelWidth((w) => {
+          try {
+            window.localStorage.setItem(PANEL_STORAGE_KEY, String(w));
+          } catch {
+            // ignore storage errors
+          }
+          return w;
+        });
+      };
+      document.addEventListener("pointermove", onMove);
+      document.addEventListener("pointerup", onUp);
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+    },
+    [panelWidth],
+  );
+
   const [filesPath, setFilesPath] = useState("/home/user/target");
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
@@ -198,10 +248,17 @@ export function SandboxPanel({
   return (
     <aside
       className={cn(
-        "flex h-full flex-col border-l border-db-border bg-db-surface transition-all duration-200",
-        collapsed ? "w-14 items-center" : "w-full md:w-96",
+        "relative flex h-full flex-col border-l border-db-border bg-db-surface",
+        !isDragging && "transition-all duration-200",
+        collapsed ? "w-14 items-center" : "w-full md:w-auto",
       )}
+      style={collapsed ? undefined : { width: `min(${panelWidth}px, 100vw)` }}
     >
+      <div
+        onPointerDown={handleDragStart}
+        className="absolute left-0 top-0 z-20 hidden h-full w-1.5 cursor-col-resize bg-transparent transition-colors hover:bg-db-accent/30 md:block"
+        title="Drag to resize"
+      />
       <div
         className={cn(
           "flex h-14 items-center justify-between border-b border-db-border px-3",

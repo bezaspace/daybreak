@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import type { AgentConfig, LlmPricingMap } from "./types.js";
@@ -23,6 +24,11 @@ export interface DaybreakConfig {
   e2bTemplate?: string;
   githubToken?: string;
   githubAppId?: string;
+  githubAppPrivateKeyPath?: string;
+  githubAppPrivateKey?: string;
+  githubClientId?: string;
+  githubClientSecret?: string;
+  githubInstallationId?: string;
   githubWebhookSecret?: string;
   githubWebhookRepoAllowlist?: string;
   githubWebhookRateLimit?: number;
@@ -124,8 +130,25 @@ export const DEFAULT_DENYLIST_PATTERNS: string[] = [
   ".zsh_history",
 ];
 
+function findEnvFile(): string {
+  // In test mode, don't walk up — tests set their own env vars explicitly.
+  if (process.env.NODE_ENV === "test") {
+    return resolve(process.cwd(), ".env");
+  }
+  // Walk up from cwd to find .env (handles monorepo packages running from subdirs)
+  let dir = process.cwd();
+  for (let i = 0; i < 10; i++) {
+    const candidate = resolve(dir, ".env");
+    if (existsSync(candidate)) return candidate;
+    const parent = resolve(dir, "..");
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return resolve(process.cwd(), ".env");
+}
+
 export function loadConfig(envPath?: string): DaybreakConfig {
-  dotenv.config({ path: envPath ? resolve(envPath) : resolve(process.cwd(), ".env") });
+  dotenv.config({ path: envPath ? resolve(envPath) : findEnvFile() });
 
   const get = (name: string): string | undefined => process.env[name];
   const requireString = (name: string): string => {
@@ -207,6 +230,11 @@ export function loadConfig(envPath?: string): DaybreakConfig {
     e2bTemplate: get("E2B_TEMPLATE") || "base",
     githubToken: get("GITHUB_TOKEN"),
     githubAppId: get("GITHUB_APP_ID"),
+    githubAppPrivateKeyPath: get("GITHUB_PRIVATE_KEY_PATH"),
+    githubAppPrivateKey: get("GITHUB_PRIVATE_KEY"),
+    githubClientId: get("GITHUB_CLIENT_ID"),
+    githubClientSecret: get("GITHUB_CLIENT_SECRET"),
+    githubInstallationId: get("GITHUB_INSTALLATION_ID"),
     githubWebhookSecret: get("GITHUB_WEBHOOK_SECRET"),
     githubWebhookRepoAllowlist: get("GITHUB_WEBHOOK_REPO_ALLOWLIST"),
     githubWebhookRateLimit: parseIntEnv("GITHUB_WEBHOOK_RATE_LIMIT", 10),

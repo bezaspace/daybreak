@@ -5,6 +5,7 @@ import { Button } from "../base/Button.js";
 import { Input } from "../base/Input.js";
 import { Label } from "../base/Label.js";
 import { Select } from "../base/Select.js";
+import { RepoSelect } from "./RepoSelect.js";
 import type { Task } from "../../lib/types.js";
 
 interface ComposerProps {
@@ -391,19 +392,13 @@ export function Composer({
       <div className="mx-auto max-w-3xl space-y-3">
         {!taskSelected && (
           <div className="flex flex-wrap items-end gap-2">
-            <div className="flex min-w-[12rem] flex-1 flex-col gap-1.5">
-              <Label htmlFor="composer-repo" className="text-xs text-db-text-secondary">
-                Repo
-              </Label>
-              <Input
-                id="composer-repo"
-                type="text"
-                value={repo}
-                onChange={(e) => onRepoChange(e.target.value)}
-                placeholder="https://github.com/owner/repo"
-                disabled={disabled || isRunning}
-              />
-            </div>
+            <RepoSelect
+              value={repo}
+              onChange={onRepoChange}
+              onBranchChange={onBranchChange}
+              branch={branch}
+              disabled={disabled || isRunning}
+            />
             <div className="flex w-32 flex-col gap-1.5">
               <Label htmlFor="composer-branch" className="text-xs text-db-text-secondary">
                 Branch

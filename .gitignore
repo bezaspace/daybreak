@@ -14,3 +14,10 @@ dist/
 supabase/.temp/
 test-results/
 playwright-report/
+# GitHub App credentials (never commit secrets)
+credentials/
+*.pem
+GITHUB_APP_CREDENTIALS.md
+# Local dev shortcuts
+/sb
+/sf

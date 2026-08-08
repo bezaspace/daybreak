@@ -146,13 +146,18 @@ export function App() {
       .catch(() => {});
   }
 
-  async function loadTaskAndMessages(taskId: string) {
+  async function loadTaskAndMessages(taskId: string): Promise<Task | undefined> {
     try {
       const [taskRes, eventsRes, messagesRes] = await Promise.all([
         fetch(`/api/tasks/${taskId}`),
         fetch(`/api/tasks/${taskId}/events`),
         fetch(`/api/tasks/${taskId}/messages`),
       ]);
+      if (taskRes.status === 404) {
+        setStatus("idle");
+        setActiveTaskId(null);
+        return undefined;
+      }
       const task = (await taskRes.json()) as Task | undefined;
       const history = (await eventsRes.json()) as StreamEvent[] | undefined;
       const serverMessages = (await messagesRes.json()) as ChatMessage[] | undefined;
@@ -170,6 +175,7 @@ export function App() {
           : buildMessagesFromEvents(history || [], task?.prompt),
       );
       setScreenshots(extractScreenshots(history || []));
+      return task;
     } catch {
       // ignore
     }
@@ -242,67 +248,73 @@ export function App() {
     setScreenshots([]);
     setMetrics(null);
     setCostAlert(null);
-    setStatus("running");
+    setStatus("loading");
     setPrUrl(null);
     setPrBranch(null);
-    loadTaskAndMessages(activeTaskId);
 
-    const es = new EventSource(`/api/tasks/${activeTaskId}/stream`);
-    es.onmessage = (message) => {
-      if (!message.data) return;
-      try {
-        const event = JSON.parse(message.data) as StreamEvent;
-        setEvents((prev) => [...prev, event]);
-        setMessages((prev) => appendEvent(prev, event));
-        if (event.type === "browser_screenshot") {
-          const data = event.data as { screenshot?: string; url?: string; mimeType?: string };
-          if (data.screenshot) {
-            const mimeType = data.mimeType || "image/png";
-            setScreenshots((prev) => [
-              ...prev,
-              { dataUrl: `data:${mimeType};base64,${data.screenshot}`, url: data.url, timestamp: event.timestamp },
-            ]);
-          }
-        }
-        if (event.type === "pr_created") {
-          const data = event.data as { prUrl?: string; prBranch?: string };
-          if (data.prUrl) {
-            setPrUrl(data.prUrl);
-            setPrBranch(data.prBranch || null);
-            loadTasks();
-            es.close();
-          }
-        }
-        if (event.type === "task_complete") {
-          setStatus("complete");
-          const data = event.data as { metrics?: TaskMetrics; provider?: string; traceId?: string };
-          if (data.metrics) setMetrics(data.metrics);
-          if (data.provider) setActiveProvider(data.provider);
-          if (data.traceId) loadTasks();
-        }
-        if (event.type === "task_failed") {
-          setStatus("failed");
-          const data = event.data as { metrics?: TaskMetrics; error?: string; provider?: string };
-          if (data.metrics) setMetrics(data.metrics);
-          if (data.provider) setActiveProvider(data.provider);
-        }
-        if (event.type === "cost_alert") {
-          const data = event.data as { current: number; limit: number; threshold: number };
-          setCostAlert(data);
-        }
-      } catch {
-        // ignore heartbeat or malformed
-      }
-    };
+    let es: EventSource | null = null;
 
-    es.onopen = () => setStreamConnected(true);
-    es.onerror = () => {
-      setStreamConnected(false);
-    };
+    loadTaskAndMessages(activeTaskId).then((task) => {
+      // Only open the SSE stream for actually-running tasks
+      if (!task || task.status !== "running") return;
+
+      es = new EventSource(`/api/tasks/${activeTaskId}/stream`);
+      es.onmessage = (message) => {
+        if (!message.data) return;
+        try {
+          const event = JSON.parse(message.data) as StreamEvent;
+          setEvents((prev) => [...prev, event]);
+          setMessages((prev) => appendEvent(prev, event));
+          if (event.type === "browser_screenshot") {
+            const data = event.data as { screenshot?: string; url?: string; mimeType?: string };
+            if (data.screenshot) {
+              const mimeType = data.mimeType || "image/png";
+              setScreenshots((prev) => [
+                ...prev,
+                { dataUrl: `data:${mimeType};base64,${data.screenshot}`, url: data.url, timestamp: event.timestamp },
+              ]);
+            }
+          }
+          if (event.type === "pr_created") {
+            const data = event.data as { prUrl?: string; prBranch?: string };
+            if (data.prUrl) {
+              setPrUrl(data.prUrl);
+              setPrBranch(data.prBranch || null);
+              loadTasks();
+              es?.close();
+            }
+          }
+          if (event.type === "task_complete") {
+            setStatus("complete");
+            const data = event.data as { metrics?: TaskMetrics; provider?: string; traceId?: string };
+            if (data.metrics) setMetrics(data.metrics);
+            if (data.provider) setActiveProvider(data.provider);
+            if (data.traceId) loadTasks();
+          }
+          if (event.type === "task_failed") {
+            setStatus("failed");
+            const data = event.data as { metrics?: TaskMetrics; error?: string; provider?: string };
+            if (data.metrics) setMetrics(data.metrics);
+            if (data.provider) setActiveProvider(data.provider);
+          }
+          if (event.type === "cost_alert") {
+            const data = event.data as { current: number; limit: number; threshold: number };
+            setCostAlert(data);
+          }
+        } catch {
+          // ignore heartbeat or malformed
+        }
+      };
+
+      es.onopen = () => setStreamConnected(true);
+      es.onerror = () => {
+        setStreamConnected(false);
+      };
+    });
 
     return () => {
       setStreamConnected(false);
-      es.close();
+      es?.close();
     };
   }, [activeTaskId]);
 
