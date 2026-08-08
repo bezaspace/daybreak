@@ -524,6 +524,71 @@
 
 ---
 
+## D42. Cloud / Local mode package toggle
+
+**Decision:** Add a single `DAYBREAK_MODE=cloud|local` package switch that selects the entire pluggable infrastructure stack. In `cloud` mode the system uses existing managed services (E2B, Supabase Cloud, Upstash, Langfuse Cloud). In `local` mode it uses self-hosted replacements (Den, Supabase Local CLI, local Redis + UpRedis, Arize Phoenix). The UI exposes one toggle, not per-service toggles.
+
+**Rationale:** A single switch prevents accidental hybrid configurations that still consume cloud quotas, and it keeps the UI and configuration model simple. During heavy testing the whole stack can be pointed locally with one change.
+
+**Consequences:**
+- `packages/shared/src/config.ts` gains a `mode` field and provider URLs/credentials that vary by mode.
+- The control plane and agent runner select provider implementations based on `mode`.
+- Cloud mode remains the default so existing deployments are unaffected.
+
+---
+
+## D43. Self-hosted sandbox: Den
+
+**Decision:** Use Den (`github.com/us/den`) as the local-mode sandbox provider, replacing E2B. The existing E2B provider remains the cloud-mode default. Daytona stays available as a fallback if Den proves immature.
+
+**Rationale:** Den is a single-binary, Docker-backed sandbox with a TypeScript SDK and a REST API designed as a drop-in E2B alternative. It avoids E2B credit consumption during development and testing.
+
+**Consequences:**
+- `packages/agent-runner` gains a Den-backed sandbox implementation alongside `sandbox.ts` and `sandbox-daytona.ts`.
+- Local Docker Compose includes a Den service.
+- If Den lacks browser or snapshot features, Daytona can be swapped in with the same interface.
+
+---
+
+## D44. Local persistence: Supabase Local CLI
+
+**Decision:** Use Supabase Local CLI (`npx supabase start`) for local-mode persistence, replacing Supabase Cloud. It runs Postgres + PostgREST + Realtime in Docker.
+
+**Rationale:** The existing Supabase SDK, migrations, and table schemas remain unchanged. Supabase Local CLI is the closest local equivalent to Supabase Cloud, so the migration from local dev to hosted production stays trivial.
+
+**Consequences:**
+- Local Docker Compose (or a Supabase-managed set of containers) provides Postgres and the Supabase services.
+- `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` in local mode point to the local CLI endpoints.
+- No Supabase Cloud storage or row limits are consumed during local testing.
+
+---
+
+## D45. Local event stream: Redis + UpRedis-compatible REST proxy
+
+**Decision:** Replace Upstash Redis Cloud with a local Redis container plus an Upstash-compatible REST proxy (`up-redis` preferred, `serverless-redis-http` as fallback) for local-mode event streaming. The `@upstash/redis` SDK stays in place; only the URL and token change.
+
+**Rationale:** The proxy implements the Upstash Redis REST API, so the existing Redis code paths and SDK calls work without rewriting. This avoids the 500K command/month free-tier cap during heavy testing.
+
+**Consequences:**
+- Local Docker Compose includes `redis` and the REST proxy.
+- `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_TOKEN` point to the local proxy.
+- If the proxy has compatibility gaps, we can later switch to a native Redis client, but that is a larger change.
+
+---
+
+## D46. Local observability: Arize Phoenix
+
+**Decision:** Replace Langfuse Cloud with self-hosted Arize Phoenix for local-mode observability. Langfuse Cloud remains the cloud-mode default.
+
+**Rationale:** Langfuse Cloud's free trace tier is small for heavy testing, and self-hosted Langfuse requires ClickHouse, Postgres, and Redis — a heavy local footprint. Arize Phoenix is open-source, runs in Docker, supports OpenTelemetry ingestion, and provides trace/cost views with a smaller resource footprint.
+
+**Consequences:**
+- The OTel exporter endpoint switches to Phoenix in local mode.
+- The existing Langfuse trace-tree UI may need a Phoenix-compatible adapter, or Phoenix's own UI can be used during local development.
+- If Phoenix does not cover a needed Langfuse feature, we can reconsider self-hosted Langfuse or sampling in cloud mode.
+
+---
+
 # Appendix A — Environment & Secrets Reference
 
 This appendix merges the operational reference from the former `docs/SECRETS.md` and `.env.example`. The exact environment variable names are the source of truth in `packages/shared/src/config.ts`.
