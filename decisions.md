@@ -539,14 +539,13 @@
 
 ## D43. Self-hosted sandbox: Den
 
-**Decision:** Use Den (`github.com/us/den`) as the local-mode sandbox provider, replacing E2B. The existing E2B provider remains the cloud-mode default. Daytona stays available as a fallback if Den proves immature.
+**Decision:** Use Den (`github.com/us/den`) as the local-mode sandbox provider, replacing E2B. The existing E2B provider remains the cloud-mode default.
 
 **Rationale:** Den is a single-binary, Docker-backed sandbox with a TypeScript SDK and a REST API designed as a drop-in E2B alternative. It avoids E2B credit consumption during development and testing.
 
 **Consequences:**
-- `packages/agent-runner` gains a Den-backed sandbox implementation alongside `sandbox.ts` and `sandbox-daytona.ts`.
+- `packages/agent-runner` gains a Den-backed sandbox implementation alongside `sandbox.ts`.
 - Local Docker Compose includes a Den service.
-- If Den lacks browser or snapshot features, Daytona can be swapped in with the same interface.
 
 ---
 

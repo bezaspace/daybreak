@@ -55,5 +55,4 @@ Each milestone is independently testable and leaves cloud mode untouched. Pick t
 
 ## Open questions
 
-- Den is the first-choice sandbox; Daytona is the fallback if Den proves immature.
 - Exact CPU/RAM/disk requirements for the full local stack on a laptop.
