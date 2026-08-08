@@ -7,7 +7,7 @@ TARGET_BRANCH="${TARGET_BRANCH:-main}"
 PROMPT="${PROMPT:-Fix the failing test in this repository. Read the source and test files, understand the bug, make the minimal fix, and run the test command until it passes.}"
 CONTROL_PLANE_URL="${CONTROL_PLANE_URL:-http://127.0.0.1:8787}"
 DEN_URL="${DEN_URL:-http://127.0.0.1:8080}"
-LLM_MODEL="${LLM_MODEL:-inclusionai/ling-3.0-tiny:free}"
+USE_LLM_MODEL="${USE_LLM_MODEL:-inclusionai/ling-3.0-tiny:free}"
 MAX_TURNS="${MAX_TURNS:-20}"
 MAX_COST_USD="${MAX_COST_USD:-0.10}"
 MAX_WALL_CLOCK_MINUTES="${MAX_WALL_CLOCK_MINUTES:-10}"
@@ -32,12 +32,12 @@ pnpm --filter agent-runner build:bundle
 CP_PID=""
 if ! curl -fsS "$CONTROL_PLANE_URL/api/queue/status" >/dev/null 2>&1; then
   echo "[run-local-e2e] starting control plane..."
-  # Export the corrected model so the secret value with an invalid suffix is overridden.
-  export LLM_MODEL
+  # Export the corrected model so a secret value with an invalid suffix is overridden.
+  export LLM_MODEL="$USE_LLM_MODEL"
   (cd packages/control-plane && pnpm exec tsx src/server.ts) &
   CP_PID=$!
   for i in $(seq 1 30); do
-    if curl -fsS "$CONTROL_PLANE_URL/api/health" >/dev/null 2>&1; then
+    if curl -fsS "$CONTROL_PLANE_URL/api/queue/status" >/dev/null 2>&1; then
       break
     fi
     sleep 1
