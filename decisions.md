@@ -1,8 +1,8 @@
 # Decisions — Daybreak
 
-**A living log of the architectural, product, and sequencing decisions behind the Daybreak roadmap.**
+**A living log of the architectural, product, and sequencing decisions behind the Daybreak project.**
 
-> **Status:** Updated through Phase 6 M9 (complete).  
+> **Status:** Updated through Phase 6 (complete). Phase 7 is the remaining work.  
 > **Started:** 2026-08-01
 
 ---
@@ -15,15 +15,15 @@
 
 **Consequences:**
 - No billing, multi-tenant SaaS, or enterprise sales features.
-- We optimize for clarity, observability, and demoability over market-fit velocity.
+- Optimize for clarity, observability, and demoability over market-fit velocity.
 
 ---
 
 ## D2. Agent kernel: Pi SDK (`pi-coding-agent` / `pi-agent-core`)
 
-**Decision:** Build the agent runner on top of the Pi SDK (`@earendil-works/pi-coding-agent`, which wraps `pi-agent-core`, currently `0.83.0`).
+**Decision:** Build the agent runner on top of the Pi SDK (`@earendil-works/pi-agent-core`, currently `0.83.0`), wrapped by `@earendil-works/pi-coding-agent`.
 
-**Rationale:** `pi-coding-agent` ships with the built-in read/bash/edit/write tools, `AgentSession`, and tree-structured session management that Phase 0 needs. It is open-source and matches the TypeScript/Node control-plane stack. `pi-agent-core` remains the underlying abstraction for tool-call hooks and event streaming.
+**Rationale:** Pi ships with the built-in `read`/`bash`/`edit`/`write` tools, `AgentSession`, and tree-structured session management. It is open-source and matches the TypeScript/Node control-plane stack.
 
 **Alternatives considered:**
 - LangChain/LangGraph: heavier and more opinionated.
@@ -31,7 +31,7 @@
 
 **Consequences:**
 - We are tied to Pi's tool-registration and session APIs.
-- The time-travel feature depends on whether Pi sessions can be serialized/forked. If not, we must wrap or extend it.
+- The time-travel feature depends on whether Pi sessions can be serialized/forked. `SessionManager` JSONL files are portable across Node processes, so we serialize the session and reload it rather than trying to snapshot a running `Agent` object.
 
 ---
 
@@ -54,8 +54,8 @@
 **Rationale:** Local iteration is faster, but a later rewrite for Cloudflare would be costly. Writing Worker-compatible code now makes deployment a configuration step.
 
 **Consequences:**
-- No Node-only modules (`fs`, `child_process`, `http` server) in core control-plane code.
-- Long-running tasks must not live inside a Worker invocation; they must be offloaded to E2B sandboxes and triggered via durable queues/Durable Objects.
+- No Node-only modules (`fs`, `child_process`, `http` server) in core control-plane logic.
+- Long-running tasks must not live inside a Worker invocation; they are offloaded to E2B sandboxes and triggered via durable queues.
 
 ---
 
@@ -76,13 +76,13 @@
 
 **Decision:** Use E2B SDK-provisioned Linux containers as the agent execution environment.
 
-**Rationale:** E2B sandboxes have unrestricted outbound internet by default, which is required for the OpenAI-compatible Kilo.ai gateway. They support full Linux command execution, filesystem operations, git, snapshots, and a free Hobby tier with $100 in one-time credits. This replaces Daytona, whose sandbox network only allows a fixed allow-list of LLM providers and reset `api.kilo.ai`.
+**Rationale:** E2B sandboxes have unrestricted outbound internet by default, which is required for arbitrary OpenAI-compatible providers. They support full Linux command execution, filesystem operations, git, snapshots, and a free Hobby tier with $100 in one-time credits.
 
 **Consequences:**
 - We depend on E2B's API stability and free-tier credit availability.
-- The default `base` template ships Node 20; the runner installs Node 22 at sandbox startup to match the bundled `undici`/`pi-agent-core` runtime.
+- The default `base` template ships Node 20; the runner installs Node 22 at sandbox startup.
 - For the browser/Playwright tool, the `base` template's ~418 MiB memory limit caused Chromium's V8 renderer to OOM. A custom `daybreak-browser` E2B template with 2 vCPU / 1536 MB RAM, Node 22, Chromium, and `playwright-core` is built once and used by `sandbox.ts --template=daybreak-browser` or `E2B_TEMPLATE=daybreak-browser`.
-- Per-turn snapshots for time-travel may be expensive or slow; we must measure and fall back if needed.
+- Per-turn snapshots for time-travel may be expensive or slow; we measured and fell back to git-based checkpoints with optional E2B snapshots for forks.
 
 ---
 
@@ -93,8 +93,9 @@
 **Rationale:** Avoids vendor lock-in and lets the project ride free-tier endpoints (Groq, OpenRouter, self-hosted vLLM/Ollama). Provider reliability is handled explicitly.
 
 **Consequences:**
-- We must normalize differences in context window, rate limits, and error behavior.
-- Prompts and evals should be written to work across providers, not tuned to a single model.
+- We normalize differences in context window, rate limits, and error behavior through config.
+- Prompts and evals are written to work across providers, not tuned to a single model.
+- The control-plane can fail-fast to the fallback after `DAYBREAK_PROVIDER_FAILURE_THRESHOLD` consecutive retryable errors.
 
 ---
 
@@ -105,22 +106,22 @@
 **Rationale:** Serverless Redis with a free tier and a simple REST API; works with both local and Cloudflare deployments.
 
 **Consequences:**
-- Free tier is 500K commands/month. Events are appended to per-task lists with batched `RPUSH` and a single `LTRIM` per flush, keeping the last 1000 events. This keeps command volume low enough for thousands of short runs per month.
+- Free tier is 500K commands/month. Events are appended to per-task lists with batched `RPUSH` and a single `LTRIM` per flush, keeping the last 1000 events.
 - If the quota is exhausted, streaming degrades or stops; the 1000-event retention and SSE replay still let a late-joining UI catch up while the quota lasts.
-- The implementation uses `@upstash/redis` inside the agent bundle and inside the control plane, so both local and Cloudflare deployments share the same client.
+- Both the agent runner and the control plane use `@upstash/redis`.
 
 ---
 
 ## D9. Supabase Postgres for session persistence
 
-**Decision:** Use Supabase Postgres for `sessions`, `tasks`, `events`, `checkpoints`, installations, and task-queue state.
+**Decision:** Use Supabase Postgres for `tasks`, `events`, `messages`, `checkpoints`, `session_snapshots`, tenant, and queue state.
 
 **Rationale:** Free-tier managed Postgres with a generous REST/Realtime API.
 
 **Consequences:**
-- 500MB limit requires retention/archival policy for old traces and events.
+- 500MB limit requires retention/archival policy for old events.
 - We must be careful with row counts and payload sizes for streamed events.
-- The Phase 1 schema adds `tasks` (task metadata and PR URL), `events` (per-task event stream), `sessions` (Pi state reference), and `checkpoints` (turn/snapshot references for time-travel). The control plane persists every event it reads from the Redis stream and serves `GET /api/tasks/:id/events` from Postgres.
+- The control plane persists every event it reads from the Redis stream and serves `GET /api/tasks/:id/events` from Postgres.
 
 ---
 
@@ -159,8 +160,9 @@
 **Rationale:** Snapshots are the cleanest conceptual match for time-travel, but cost and latency may make them impractical at turn granularity.
 
 **Consequences:**
-- Phase 0 measures snapshot latency/cost and decides the default for Phase 4.
-- The agent runner must support both modes through a common checkpoint interface.
+- Phase 0 measured snapshot latency/cost and decided the default for Phase 4.
+- The agent runner supports both modes through a common checkpoint interface.
+- See D37 for the final default (`git-reinstall`) and optional snapshot strategy.
 
 ---
 
@@ -178,13 +180,14 @@
 
 ## D14. Cost and quota budget as a deliverable
 
-**Decision:** Produce a living `docs/COST_BUDGET.md` in Phase 0 and update it as the project evolves.
+**Decision:** Produce a living cost/quotabudget model in Phase 0 and update it as the project evolves.
 
 **Rationale:** The "$0 operating cost" claim is central to the project. It must be modeled, not asserted.
 
 **Consequences:**
 - We may need to throttle streaming, sample traces, or reduce snapshot frequency to stay inside free tiers.
 - The budget becomes an input to design decisions (e.g., why we batch Redis commands).
+- The budget summary lives in `roadmap.md` Appendix A.
 
 ---
 
@@ -209,7 +212,7 @@
 
 **Consequences:**
 - Adds UI surface area and webhook flow complexity.
-- May slow down fully-autonomous demos, but can be configured per-task or per-installation.
+- May slow down fully-autonomous demos, but can be configured per-task or per-installation (`requireApprovalForDestructive`).
 
 ---
 
@@ -221,8 +224,7 @@
 
 **Consequences:**
 - The PR delivery path is the normal way to land code.
-- A temporary `PROTECTED_BRANCHES=__none__` override was used during the first Phase 1 slice to enable direct `main` pushes while the sandbox flow was being proven. That override is removed now that the agent creates `daybreak/<task-id>` branches and the control plane opens PRs via the GitHub API.
-- Some operations (e.g., automated releases) may need explicit out-of-scope handling.
+- A temporary `PROTECTED_BRANCHES=__none__` override was used during the first Phase 1 slice but has been removed.
 
 ---
 
@@ -235,6 +237,7 @@
 **Consequences:**
 - Denylist must be updated as new secret patterns are discovered.
 - Redaction is defense-in-depth; it does not replace proper secret management.
+- See `roadmap.md` Appendix B for the Phase 6 security audit findings.
 
 ---
 
@@ -242,24 +245,25 @@
 
 **Decision:** Integrate headless Chromium/Playwright inside the sandbox from Phase 1, not later.
 
-**Rationale:** The README promises browser-based visual verification. Without it, the MVP cannot handle web-app tasks or visually confirm UI changes.
+**Rationale:** The project promises browser-based visual verification. Without it, the MVP cannot handle web-app tasks or visually confirm UI changes.
 
 **Consequences:**
 - Sandbox image grows and cold start may increase slightly. To avoid installing Chromium at runtime, a custom `daybreak-browser` E2B template is built with Node 22, Chromium, and `playwright-core` pre-installed.
 - The `base` template's 512 MB memory limit was too small for Chromium's V8 renderer; the `daybreak-browser` template is provisioned with 1536 MB RAM.
-- Screenshots are emitted as `browser_screenshot` events and streamed to the UI over the existing Upstash Redis/SSE channel.
+- Screenshots are emitted as `browser_screenshot` events and streamed to the UI.
 
 ---
 
-## D20. Task queue, idempotency, and retry (Phase 6, not MVP)
+## D20. Task queue, idempotency, and retry in Phase 6
 
-**Decision:** Use a simple in-memory/Single-process queue in Phase 1–3; introduce a durable queue with idempotency and retry only in Phase 6.
+**Decision:** Use a simple in-memory/single-process queue in Phase 1–3; introduce a durable queue with idempotency and retry in Phase 6.
 
-**Rationale:** A full queue system is not needed for a single-user local demo. It becomes essential once the GitHub App is public and multiple triggers can arrive concurrently.
+**Rationale:** A full queue system is not needed for a single-user local demo. It becomes essential once the GitHub webhook surface is public and multiple triggers can arrive concurrently.
 
 **Consequences:**
-- Early phases can lose or duplicate tasks under concurrent load, which is acceptable for local demos but not production.
-- The control plane is designed with queue semantics from the start so the later migration is mechanical.
+- Early phases could lose or duplicate tasks under concurrent load, which was acceptable for local demos but not production.
+- The control plane was designed with queue semantics from the start so the later migration is mechanical.
+- Phase 6 ships `TaskQueue`, `IdempotencyStore`, `RetryScheduler`, and `CleanupService` in `packages/control-plane/src`.
 
 ---
 
@@ -278,19 +282,19 @@
 **Rationale:** Time-travel is the headline differentiator and is the harder vertical slice. CI self-healing is valuable but relies on Phase 3 webhook and PR machinery already in place.
 
 **Consequences:**
-- If the Phase 0 feasibility spike fails and time-travel is descoped, Phase 5 (CI self-healing) can still ship independently.
+- If the Phase 0 feasibility spike had failed and time-travel was descoped, Phase 5 (CI self-healing) could still ship independently.
 
 ---
 
 ## D23. Secrets management strategy
 
-**Decision:** No secrets in source code. Local development uses `.env` plus a team-managed secret manager (1Password/direnv). Cloud deployment uses Cloudflare Worker secrets and Supabase Vault. GitHub App private keys are Cloudflare/Worker secrets.
+**Decision:** No secrets in source code. Local development uses `.env` plus a team-managed secret manager. Cloud deployment uses Cloudflare Worker secrets and Supabase Vault. GitHub App private keys are Cloudflare/Worker secrets.
 
 **Rationale:** Prevents secret leakage and supports rotation without code changes.
 
 **Consequences:**
 - `.env.example` is the only committed reference.
-- Documentation must clearly describe how to provision each secret.
+- The full environment variable and secret inventory is in the **Environment & Secrets Reference** appendix of this document.
 
 ---
 
@@ -301,7 +305,7 @@
 **Rationale:** Multi-tenancy is complex and not needed for a working demo or a single-user GitHub App install.
 
 **Consequences:**
-- Phase 3 tables can assume one active installation; Phase 6 migrates to a tenant-aware schema.
+- Phase 3 tables assumed one active installation; Phase 6 migrates to a tenant-aware schema (`TenantService`).
 
 ---
 
@@ -315,9 +319,12 @@
 
 ## D26. Documentation as a deliverable
 
-**Decision:** Every phase ends with updated documentation: `README.md`, `ROADMAP.md`, `decisions.md`, `docs/COST_BUDGET.md`, and eventually `DEPLOYMENT.md` and operator runbooks.
+**Decision:** Every phase ends with updated documentation. The canonical project documents are `roadmap.md` (plan, status, budget, security findings) and `decisions.md` (decisions, environment reference).
 
 **Rationale:** The project is meant to demonstrate the engineering of autonomous coding agents. Documentation is part of the artifact.
+
+**Consequences:**
+- All other planning/spec docs are merged into these two files or removed when superseded.
 
 ---
 
@@ -350,13 +357,13 @@
 
 ## D31. Context compaction and circuit breakers in Phase 1
 
-**Decision:** Wire Pi's built-in context compaction into `session.ts` from Phase 1, controlled by `COMPACTION_ENABLED`, `COMPACTION_RESERVE_TOKENS`, and `COMPACTION_KEEP_RECENT_TOKENS` environment variables. The existing `MAX_TURNS`, `MAX_WALL_CLOCK_MINUTES`, and `MAX_COST_USD` circuit breakers continue to abort the task when exceeded.
+**Decision:** Wire Pi's built-in context compaction into `packages/agent-runner/src/session.ts` from Phase 1, controlled by `COMPACTION_ENABLED`, `COMPACTION_RESERVE_TOKENS`, and `COMPACTION_KEEP_RECENT_TOKENS` environment variables. The existing `MAX_TURNS`, `MAX_WALL_CLOCK_MINUTES`, and `MAX_COST_USD` circuit breakers continue to abort the task when exceeded.
 
 **Rationale:** Long agent runs on non-trivial repos will exceed the context window. Relying on the Pi SDK's compaction keeps the implementation aligned with the kernel and avoids building a custom summarizer. The circuit breakers prevent runaway cost or time.
 
 **Consequences:**
-- Compaction events (`compaction_start`/`compaction_end`) are emitted to the stream and persisted, so the dashboard can show when context was summarized.
-- Compaction consumes extra LLM tokens/cost (a summarization call), so `MAX_COST_USD` must be set high enough to allow it.
+- Compaction events (`compaction_start`/`compaction_end`) are emitted to the stream and persisted.
+- Compaction consumes extra LLM tokens/cost, so `MAX_COST_USD` must be set high enough to allow it.
 - Tuning `reserveTokens`/`keepRecentTokens` is model- and task-dependent; the defaults (4000/8000) are conservative for small-context models.
 
 ---
@@ -365,7 +372,7 @@
 
 **Decision:** Run the Phase 0 eval harness end-to-end through the real control plane and E2B sandbox (`packages/evals/src/e2e.ts`) rather than only through the local `TaskRunner`.
 
-**Rationale:** Local `TaskRunner` evals prove agent logic but do not exercise sandbox provisioning, git push, GitHub PR creation, Upstream Redis streaming, or Supabase persistence. The E2E harness gives the true MVP exit-criteria signal.
+**Rationale:** Local `TaskRunner` evals prove agent logic but do not exercise sandbox provisioning, git push, GitHub PR creation, Upstash Redis streaming, or Supabase persistence. The E2E harness gives the true MVP exit-criteria signal.
 
 **Consequences:**
 - The E2E harness triggers `POST /api/tasks`, polls for completion, reads stream events, and records wall-clock, turns, tool calls, token count, cost, and the PR URL.
@@ -376,7 +383,7 @@
 
 ## D33. Pre-checkout feature branch and denylist `bash` sensitive paths
 
-**Decision:** `run-task.ts` now creates the `daybreak/<task-id>` feature branch and sets the bot git identity before the Pi agent runs. `SafetyMiddleware` parses `bash` command tokens and blocks any command that references a sensitive path matching the denylist (e.g., `cat .env`).
+**Decision:** `packages/agent-runner/src/run-task.ts` creates the `daybreak/<task-id>` feature branch and sets the bot git identity before the Pi agent runs. `SafetyMiddleware` parses `bash` command tokens and blocks any command that references a sensitive path matching the denylist (e.g., `cat .env`).
 
 **Rationale:** The LLM occasionally issues `git push origin main` or `cat .env` despite prompt instructions. Enforcing branch and denylist at the tool level makes the guardrail independent of prompt compliance.
 
@@ -384,9 +391,11 @@
 - The sandbox workspace is always on the feature branch, so `git push` without an explicit branch argument pushes the feature branch.
 - `.env`, `.env.*`, `*.pem`, `.ssh/**`, `.git/config`, and other denylist paths are blocked whether the agent uses the `read` tool or a `bash` command.
 
+---
+
 ## D34. Dashboard exit-criteria presets
 
-**Decision:** The React dashboard exposes two preset buttons: "Fix failing-sum test" (runs the `bezaspace/daybreak-target` fixture with default circuit breakers) and "Demo MAX_TURNS=3" (overrides `maxTurns` to demonstrate the circuit breaker).
+**Decision:** The React dashboard exposes preset triggers for common demos, e.g., "Fix failing-sum test" and a "Demo MAX_TURNS=3" override, that call `POST /api/tasks` with the appropriate repo/branch and limits.
 
 **Rationale:** A one-click demo makes the Phase 1 exit criteria repeatable and easy to verify without manually filling the repo/branch form.
 
@@ -394,15 +403,19 @@
 - Presets set `repo` and `branch` and call `POST /api/tasks` with optional per-task `maxTurns`/`maxCostUsd`/`maxWallClockMinutes` overrides.
 - The UI shows live metrics and a circuit-breaker banner above the terminal.
 
+---
+
 ## D35. Target fixture repo with CI and a decoy `.env`
 
 **Decision:** The `bezaspace/daybreak-target` scratch repo contains a `.github/workflows/test.yml` that runs `npm test` on every PR and a decoy `.env` file. The workflow is intentionally simple so the agent-created PR gets an immediate green check.
 
-**Rationale:** The exit criteria require a PR that passes CI and a verified denylist. A small Node test fixture with a known one-line bug keeps the demo fast and deterministic.
+**Rationale:** The exit criteria require a PR that passes CI and a verified denylist. A small Node test fixture with a known bug keeps the demo fast and deterministic.
 
 **Consequences:**
 - The decoy `.env` is not a real secret; it exists only to prove the agent never reads it.
-- CI must be kept minimal (`node --test`) so it passes quickly after the agent fixes `sum.js`.
+- CI must be kept minimal (`node --test`) so it passes quickly after the agent fixes the fixture.
+
+---
 
 ## D36. Phase 3 PAT-only authentication and deferred GitHub App work
 
@@ -416,7 +429,7 @@
 - **Repo trust:** A repo allowlist (`GITHUB_WEBHOOK_REPO_ALLOWLIST`) prevents the agent from running on untrusted public repos. This replaces the per-installation scoping a GitHub App would provide.
 - **Multi-tenancy:** Per-sender (`sender.login`) or per-repo rate limits are used instead of per-installation rate limits. The `installations` table and `installation_id` foreign key are deferred.
 - **Bot identity:** The `@daybreak-bot` mention is detected as a string in `comment.body`. The PAT owner account will be the author of commits and PRs; a separate bot user account can be used by providing its PAT.
-- **CI self-healing stub:** `check_run` webhooks are acknowledged in Phase 3 but not acted on. Full CI self-healing (Phase 5) will be wired once the GitHub App path is in place.
+- **CI self-healing:** `check_run` webhooks are fully implemented in Phase 5, not merely acknowledged.
 
 **Deferred to Phase 7 / GitHub App migration:**
 - Register a GitHub App with least-privilege permissions (`contents:write`, `pull_requests:write`, `issues:read`, `checks:read`, `metadata:read`).
@@ -444,6 +457,12 @@
 - Forks spawn a new sandbox, clone the repo, checkout the checkpoint commit, re-install dependencies from the lockfile, and restore the JSONL snapshot.
 - `DAYBREAK_FORK_STRATEGY=snapshot` can bypass re-install when the benchmark justifies the snapshot cost.
 
+**Implementation notes:**
+- `SessionManager` stores messages and tool-call entries in an append-only JSONL tree with `id`/`parentId` links. Restored sessions must use the same `ModelRuntime` and model id because provider cache keys are tied to the runtime config.
+- The `Agent` object itself cannot be serialized; a fresh `AgentSession` is created and its `state.messages` is seeded from the session tree.
+- Restores are only safe at an idle leaf (between turns), not mid-tool-call.
+- Per-turn E2B snapshots were measured in `packages/agent-runner/src/spikes/snapshot-benchmark.ts` and found to be slower and more expensive than the git + re-install path for routine branching.
+
 ---
 
 ## D38. CI self-healing failure context (Phase 5 M2)
@@ -456,7 +475,7 @@
 - `CiLogFetcher` fetches `check-runs/{id}/annotations` and `actions/jobs/{id}/logs`, following the 302 redirect and respecting `DAYBREAK_MAX_CI_LOG_BYTES` (default 512 KiB).
 - `CiLogParser` cleans the log and extracts failure blocks using markers such as `FAIL`, `Error:`, `npm ERR!`, `Tests: ... failed`, and `AssertionError`, keeping `DAYBREAK_CI_LOG_CONTEXT_LINES` (default 20) on each side.
 - `redactSecrets` removes `token=...`, `api_key=...`, `SECRET=...`, bearer tokens, URL credentials, and query-string credentials without mangling surrounding text.
-- This module is consumed by the heal-task builder in M3 and is unit-tested against a 100 KB mocked log fixture.
+- This module is consumed by the heal-task builder and is unit-tested against a mocked log fixture.
 
 ---
 
@@ -467,11 +486,10 @@
 **Rationale:** `check_run` is the granular unit GitHub uses for Actions status, and it carries the `check_run.id` that maps directly to the `actions/jobs/{job_id}/logs` endpoint. Annotations provide path/line-level failure metadata, while raw logs contain the actual stack trace and error output. Reusing the review/commit path keeps the implementation small and consistent with Phase 3/4 branch iteration. Branch-prefix and known-task guards prevent the agent from healing arbitrary or protected branches. The 24-hour dedupe and max-attempt circuit breakers are the minimum viable safety net for an autonomous fix-and-push loop.
 
 **Consequences:**
-- `packages/control-plane/src/server.ts` has a `check_run` webhook case, `CiLogFetcher`/`CiLogParser` helpers, `runHeal`, and a guard chain (duplicate `checkRunId`, in-flight task, 24-hour attempt budget, same-commit cooldown, branch safety).
+- `packages/control-plane/src/server.ts` has a `check_run` webhook case, `CiLogFetcher`/`CiLogParser` helpers, and a guard chain (duplicate `checkRunId`, in-flight task, 24-hour attempt budget, same-commit cooldown, branch safety).
 - `packages/agent-runner/src/run-task.ts` and `sandbox.ts` treat `HEAL_MODE=true` like `REVIEW_MODE` for branch iteration and emit `heal_task_start`/`heal_complete`/`heal_failed`/`heal_skipped` events.
 - `packages/control-plane/src/server.test.ts` covers the webhook handler, log parser, and circuit breakers.
-- `packages/evals/src/ci-self-heal.ts` provides a real end-to-end harness (create a broken PR, wait for CI failure, send webhook, wait for heal) and a fast local integration mode that runs the control-plane `check_run` tests.
-- `docs/COST_BUDGET.md` and `docs/SECRETS.md` are updated to reflect the extra per-heal sandbox/LLM cost and the `actions:read`/`checks:read` PAT requirements.
+- `packages/evals/src/ci-self-heal.ts` provides a real end-to-end harness and a fast local integration mode.
 
 ---
 
@@ -499,19 +517,136 @@
 **Consequences:**
 - `SafetyMiddleware` checks `stats.size` and line count for `read`/`write`/`edit`, emitting `file_too_large` when `DAYBREAK_MAX_FILE_READ_BYTES` or `DAYBREAK_MAX_FILE_READ_LINES` is exceeded.
 - `packages/agent-runner/src/run-task.ts` passes `--depth N` to `git clone` when `DAYBREAK_MAX_REPO_CLONE_DEPTH > 0`.
-- `DAYBREAK_COMPACTION_RESERVE_TOKENS` and `DAYBREAK_COMPACTION_KEEP_RECENT_TOKENS` are read from `loadConfig()` and can be overridden per task; `TaskRunner` emits `compaction_advised` (and calls `session.compact()` if available) when `contextWindow - reserveTokens` is crossed.
+- `COMPACTION_RESERVE_TOKENS` and `COMPACTION_KEEP_RECENT_TOKENS` are read from `loadConfig()` and can be overridden per task; `TaskRunner` emits `compaction_advised` (and calls `session.compact()` if available) when `contextWindow - reserveTokens` is crossed.
 - `createModelRuntime` tracks consecutive primary-provider retryable failures; after `DAYBREAK_PROVIDER_FAILURE_THRESHOLD` it immediately tries the fallback instead of waiting for each call to time out.
 - `packages/evals/src/resilience.ts` runs against in-memory control-plane modules by emptying `SUPABASE_URL`/`SUPABASE_SERVICE_KEY`/`UPSTASH_REDIS_REST_URL`/`UPSTASH_REDIS_TOKEN` at module load, so `pnpm eval` can validate Phase 6 behavior without live credentials. `packages/evals/src/index.ts` runs the resilience checks first and skips LLM fixtures when `LLM_API_KEY` is not configured.
-- `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm --filter agent-runner build:bundle`, and `pnpm --filter ui build` all pass. The `failing-sum` LLM fixture remains available for `pnpm eval` and `pnpm eval:e2e` when a key is present.
+- `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm --filter agent-runner build:bundle`, and `pnpm --filter ui build` are the required green gates.
 
 ---
 
-## D30. Open questions that can change these decisions
+# Appendix A — Environment & Secrets Reference
 
-- ~~Can `pi-agent-core` serialize and fork sessions cleanly?~~ **Answered in Phase 4 M1/M3:** `SessionManager` writes a `.jsonl` that can be copied and reopened with `SessionManager.open`; true in-process forking is not required because we always start a fresh `TaskRunner` from the restored state.
-- ~~What is the real cost and latency of per-turn E2B snapshots?~~ **Answered in Phase 4 M4:** snapshots are supported but more expensive/slower than `git-reinstall` with the `daybreak-browser` template, so `git-reinstall` is the default.
+This appendix merges the operational reference from the former `docs/SECRETS.md` and `.env.example`. The exact environment variable names are the source of truth in `packages/shared/src/config.ts`.
+
+## Environments
+
+| Environment | Use case | Storage |
+|-------------|----------|---------|
+| Local development (Phase 0) | Running the agent spike and evals | `.env` file loaded by `dotenv` |
+| CI (GitHub Actions) | Lint, typecheck, tests | Repository `Secrets` / `Variables` |
+| Cloudflare Workers | Control plane, GitHub App, queue, UI | `wrangler secret` / `wrangler.toml` vars (non-sensitive only) |
+| E2B | Sandbox API key | Cloudflare secret, passed to the sandbox at creation time |
+| Supabase | Database, Edge Functions | Supabase Vault / project API keys, stored in Cloudflare secrets |
+
+## Secret inventory
+
+### LLM providers
+- `LLM_API_KEY` and `LLM_FALLBACK_API_KEY` — primary and fallback OpenAI-compatible API keys.
+- Rotate keys through the provider dashboard. Use `LLM_FALLBACK_*` so the agent can degrade gracefully on rate limits.
+
+### E2B
+- `E2B_API_KEY` — create/destroy sandboxes.
+- `E2B_TEMPLATE` — optional sandbox template name. The built-in `daybreak-browser` template ships Node 22, Chromium, and `playwright-core` for the browser tool. Leave unset or set to `base` for the default template.
+- The agent should never read this from inside a sandbox. The control plane injects a short-lived sandbox API key only when spawning a workspace.
+
+### GitHub
+- `GITHUB_TOKEN` — a Personal Access Token (PAT) for Phase 3 and Phase 5. It must have `contents:write` and `pull_requests:write` on every repo Daybreak touches. Phase 5 additionally requires `actions:read` and `checks:read` to fetch failed CI job logs and annotations (these are usually included in the `repo` scope of a classic PAT). For fine-grained PATs, grant `Contents`, `Pull requests`, `Actions`, and `Checks` read/write on the selected repos.
+- `GITHUB_WEBHOOK_SECRET` — used to verify `X-Hub-Signature-256` on repo webhook deliveries. Store it as a Cloudflare/Worker secret for Phase 7; locally it lives in `.env`.
+- `GITHUB_WEBHOOK_REPO_ALLOWLIST` — comma-separated `owner/repo` or `owner/*` patterns limiting which repos may trigger the control plane.
+- `GITHUB_WEBHOOK_RATE_LIMIT` — maximum webhook-triggered tasks per repo or per sender in the last hour (default `10`).
+- `GITHUB_APP_ID` — **deferred to Phase 7**. The App will replace the PAT, add JWT signing, 1-hour installation tokens, and automatic per-installation webhooks.
+
+### Local webhook tunnel
+For Phase 3, the control plane runs locally and receives repo webhooks through a tunnel:
+
+```bash
+# Install cloudflared (or use ngrok)
+# https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/
+cloudflared tunnel --url http://localhost:8787
+```
+
+Copy the tunnel URL (e.g. `https://<random>.trycloudflare.com`) and add it as a webhook in the target repo:
+
+1. Repo **Settings** → **Webhooks** → **Add webhook**.
+2. **Payload URL**: `https://<random>.trycloudflare.com/api/webhooks/github`
+3. **Content type**: `application/json`.
+4. **Secret**: the value of `GITHUB_WEBHOOK_SECRET`.
+5. Choose **Issue comments**, **Pull request review comments**, **Pull request reviews**, and **Check runs**.
+6. Ensure the repo is in `GITHUB_WEBHOOK_REPO_ALLOWLIST`.
+
+### Redis / Supabase / Langfuse
+- `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_TOKEN` are high-sensitivity; the sandbox uses them to publish the event stream and the control plane uses them to read it back.
+- `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` are high-sensitivity and are used by the control plane to persist tasks and events.
+- Langfuse keys (`LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL`) are lower risk but still kept out of source control.
+
+## Phase 6 runtime configuration
+
+These values are not secrets but are tenant- and quota-sensitive:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `DAYBREAK_MAX_CONCURRENT_TASKS` | `2` | Max parallel running tasks in the worker. |
+| `DAYBREAK_QUEUE_WORKER_POLL_MS` | `1000` | How often the worker polls Supabase. |
+| `DAYBREAK_DEFAULT_TENANT_DAILY_COST_USD` | `0.50` | Per-tenant daily cost budget. |
+| `DAYBREAK_DEFAULT_TENANT_TASKS_PER_HOUR` | `10` | Per-tenant task creation rate limit. |
+| `DAYBREAK_DEFAULT_TENANT_MAX_CONCURRENT` | `2` | Per-tenant concurrent task cap. |
+| `DAYBREAK_GLOBAL_MAX_CONCURRENT_SANDBOXES` | `5` | Hard ceiling across all tenants. |
+| `DAYBREAK_COST_ALERT_THRESHOLD` | `0.8` | Fraction of `MAX_COST_USD` that triggers `cost_alert`. |
+| `DAYBREAK_BRANCH_TTL_DAYS` | `7` | How long stale `daybreak/` branches are kept. |
+| `DAYBREAK_SANDBOX_IDLE_TTL_MINUTES` | `15` | Grace period before an idle or terminal sandbox is killed. |
+| `DAYBREAK_DATA_RETENTION_DAYS` | `30` | Old `session_snapshots` and checkpoints are pruned after this. |
+| `DAYBREAK_CLEANUP_ENABLED` | `true` | Set to `false` to disable the background cleanup interval. |
+| `DAYBREAK_MAX_FILE_READ_BYTES` | `200000` | Hard cap on `read`/`write`/`edit` target file bytes. |
+| `DAYBREAK_MAX_FILE_READ_LINES` | `5000` | Hard cap on `read`/`write`/`edit` target file line count. |
+| `DAYBREAK_MAX_REPO_CLONE_DEPTH` | `0` | Set to `>0` to clone repos with `--depth N`. |
+| `DAYBREAK_PROVIDER_FAILURE_THRESHOLD` | `3` | Consecutive 5xx/429 errors before fail-fast to fallback. |
+| `DAYBREAK_MAX_CHECKPOINTS_PER_TASK` | `100` | Caps per-task checkpoint growth. |
+| `DAYBREAK_CHECKPOINT_INTERVAL` | `tool` | Create a checkpoint per tool call (`tool`) or per turn (`turn`). |
+| `DAYBREAK_SESSION_STORE_BACKEND` | `supabase` | Where to upload session JSONL snapshots (`file` or `supabase`). |
+| `DAYBREAK_FORK_STRATEGY` | `auto` | Default cross-sandbox fork strategy. `auto` currently resolves to `git-reinstall`; `snapshot` is supported but benchmark before enabling. |
+| `DAYBREAK_MAX_HEAL_ATTEMPTS_PER_PR` | `2` | Max `check_run` heal attempts per PR per 24h. |
+| `DAYBREAK_HEAL_COOLDOWN_SECONDS` | `60` | Same-commit heal cooldown. |
+| `DAYBREAK_MAX_CI_LOG_BYTES` | `524288` | Max raw CI log bytes fetched per heal. |
+| `DAYBREAK_CI_LOG_CONTEXT_LINES` | `20` | Context lines kept around each failure block. |
+| `DAYBREAK_PR_BRANCH_PREFIX` | `daybreak/` | Prefix for agent-created feature branches. |
+| `REVIEW_KEEP_ALIVE_MS` | `900000` (15 min) | How long a review/heal sandbox stays alive for reconnects. |
+| `COMPACTION_ENABLED` | `true` | Enable Pi context compaction. |
+| `COMPACTION_RESERVE_TOKENS` | `4000` | Token headroom before `compaction_advised` is emitted. |
+| `COMPACTION_KEEP_RECENT_TOKENS` | `8000` | Recent messages preserved during Pi compaction. |
+
+**Note:** `COMPACTION_RESERVE_TOKENS` and `COMPACTION_KEEP_RECENT_TOKENS` intentionally do **not** use a `DAYBREAK_` prefix in the code and `.env.example`; set them exactly as shown above. The other Phase 6 runtime variables use the `DAYBREAK_` prefix.
+
+### Tenant headers
+
+For local testing and Phase 7 per-installation routing, the control plane accepts:
+
+- `X-Daybreak-Tenant-Id` — override the tenant id for a request.
+- `X-Daybreak-User-Id` — identify the caller within the tenant.
+- `X-Daybreak-Role` — one of `admin`, `operator`, `viewer`. `viewer` cannot create tasks.
+
+If no tenant headers are sent, the control plane creates or reuses a default tenant so existing single-user demos continue to work.
+
+### Never commit secrets
+
+The repo uses a denylist that blocks the agent from reading files matching sensitive patterns such as `.env`, `*.pem`, `*.key`, `.npmrc`, and paths containing `secret`/`token`/`password`. CI rejects pushes that add unencrypted secret files.
+
+### Generating `.env` locally
+
+```bash
+cp .env.example .env
+# edit .env with your keys
+```
+
+`.env` is already in `.gitignore`.
+
+---
+
+# Open Questions
+
+These questions can change future decisions. The first two were answered in Phase 4 and are kept here for traceability.
+
+- ~~Can `pi-agent-core` serialize and fork sessions cleanly?~~ **Answered in Phase 4:** `SessionManager` writes a `.jsonl` that can be copied and reopened with `SessionManager.open`; true in-process forking is not required because we always start a fresh `TaskRunner` from the restored state.
+- ~~What is the real cost and latency of per-turn E2B snapshots?~~ **Answered in Phase 4:** snapshots are supported but more expensive/slower than `git-reinstall` with the `daybreak-browser` template, so `git-reinstall` is the default.
 - Which free LLM provider gives the best coding-task success rate within its rate limits?
 - Will Cloudflare Workers free tier support the expected webhook and Durable Object load?
 - How do we prevent prompt-injection or sandbox-escape attacks from malicious repositories?
-
-These questions should be answered by the Phase 0 feasibility spikes and eval harness.
